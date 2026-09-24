@@ -133,7 +133,6 @@ my-game-art/
   "version": 1,
   "exports": { "location": "alongside" },
   "clips": { "max": 20 },
-  "budgets": { "pixelsPerCall": 256, "pixelsPerTurn": 1024 },
   "aiDraft": { "layerName": "AI Draft", "opacity": 102 }
 }
 ```
@@ -240,10 +239,7 @@ The tool discourages generation through friction at three levels.
    assistant. On "draw/make me X" requests it pushes back once, explains why,
    and offers alternatives: construction breakdown, silhouette/proportion guide
    via `annotate`, palette, reference-style critique of the artist's first pass.
-2. **Tool level.** `set_pixels` is capped at `pixelsPerCall` (256) and
-   `pixelsPerTurn` (1024) outside the AI Draft layer. Enough for cleanup and
-   fixes; impractical for painting a sprite. Over-budget calls are rejected
-   with an explanatory error the agent relays.
+2. **Tool level.** *(Pixel budgets removed 2026-09-24 at the artist's request.)* `set_pixels` has no size limit; every call still needs approval unless auto-approve is on, and its description tells the agent it is for fixes, not painting artwork.
 3. **Quarantine.** If the artist insists after pushback, the agent may block
    out on the **"AI Draft"** layer only: created at 40% opacity, pixel budget
    lifted for that layer only, and the agent tells the artist to redraw over it
@@ -367,7 +363,6 @@ interface; approval, budgets, persistence, and tools are shared.
 | Tool timeout | 30 s, then error result |
 | `claude` missing / not logged in | `error` with hint ("Run `claude` in a terminal and log in") |
 | Sprite closed/moved | Error naming the path; agent reports it |
-| Over budget | Rejected before reaching the extension, explanatory error |
 | Stop pressed | Adapter cancelled; pending approval cards resolved as Deny |
 | Bad token | Connection closed; UI suggests restarting the bridge |
 | Resume failed | New session seeded with transcript summary; chat notes it |

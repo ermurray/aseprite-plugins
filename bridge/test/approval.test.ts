@@ -123,34 +123,17 @@ describe("approval gate", () => {
   });
 });
 
-describe("pixel budgets and draft mode", () => {
-  it("rejects a set_pixels call over 256 pixels without asking", async () => {
+describe("draft mode", () => {
+  it("has no pixel budget: large and repeated set_pixels calls go through once approved", async () => {
     const rec = recorder();
     const c = await setup(async function* (ctx) {
-      rec.push(await ctx.tools.call("set_pixels", px(257)));
-    });
-    c.send({ type: "user_message", text: "paint" });
-    await c.waitFor((m) => m.type === "turn_done");
-    expect(c.received.some((m) => m.type === "approval_request")).toBe(false);
-    expect(rec.results[0]).toMatchObject({ ok: false, error: expect.stringContaining("256 pixels per call") });
-  });
-
-  it("caps a reply at 1024 pixels and resets next turn", async () => {
-    const rec = recorder();
-    const c = await setup(async function* (ctx) {
+      rec.push(await ctx.tools.call("set_pixels", px(2000)));
       for (let i = 0; i < 5; i++) rec.push(await ctx.tools.call("set_pixels", px(256)));
     });
     c.send({ type: "set_auto_approve", enabled: true });
     c.send({ type: "user_message", text: "paint a lot" });
     await c.waitFor((m) => m.type === "turn_done");
-    expect(rec.results.map((r) => r.ok)).toEqual([true, true, true, true, false]);
-    expect(rec.results[4]).toMatchObject({ error: expect.stringContaining("budget for this reply") });
-
-    rec.results.length = 0;
-    const before = c.received.length;
-    c.send({ type: "user_message", text: "again" });
-    await c.waitFor((m) => m.type === "turn_done" && c.received.indexOf(m) >= before);
-    expect(rec.results[0].ok).toBe(true);
+    expect(rec.results.map((r) => r.ok)).toEqual([true, true, true, true, true, true]);
   });
 
   it("keeps the AI Draft layer locked until request_draft_mode is approved", async () => {

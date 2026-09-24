@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Adapter, AdapterFactory } from "./adapters/Adapter.js";
 import { PROTOCOL_VERSION, parseExtensionMessage, type BridgeMessage } from "./protocol.js";
 import { ToolBroker } from "./toolBroker.js";
-import { PIXEL_BUDGET, isDraftLayer } from "./tools/constants.js";
+import { isDraftLayer } from "./tools/constants.js";
 import { toolDef, type ToolDef } from "./tools/definitions.js";
 import type { ToolHost } from "./toolTypes.js";
 
@@ -29,7 +29,6 @@ export class Session {
   private broker: ToolBroker;
   private autoApprove = false;
   private draftMode = false;
-  private turnPixels = 0;
   private approvals = new Map<string, (approved: boolean) => void>();
 
   constructor(private deps: SessionDeps) {
@@ -45,7 +44,7 @@ export class Session {
         const def = toolDef(name);
         if (!def) return { ok: false, error: `Unknown tool: ${name}` };
         if (def.kind === "edit") {
-          const rejection = this.checkBudget(def, args);
+          const rejection = this.checkDraftLock(def, args);
           if (rejection) return { ok: false, error: rejection };
           if (def.alwaysAsk || !this.autoApprove) {
             const approved = await this.askApproval(def.summarize!(args), args.sprite);
@@ -53,7 +52,6 @@ export class Session {
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
           }
           if (def.name === "request_draft_mode") this.draftMode = true;
-          if (def.name === "set_pixels" && !isDraftLayer(args.layer)) this.turnPixels += (args.pixels as unknown[]).length;
         }
         this.deps.send({ type: "tool_activity", summary: def.activity(args) });
         const fwd = def.forward ? def.forward(args) : { name, args };
@@ -62,22 +60,10 @@ export class Session {
     };
   }
 
-  /** Returns a rejection message when a set_pixels call breaks the budget or draft rules. */
-  private checkBudget(def: ToolDef, args: Record<string, unknown>): string | undefined {
-    if (def.name !== "set_pixels") return undefined;
-    const n = (args.pixels as unknown[]).length;
-    if (isDraftLayer(args.layer)) {
-      return this.draftMode
-        ? undefined
-        : "The AI Draft layer is locked. Offer guidance first; only if the artist insists, call request_draft_mode with their words.";
-    }
-    if (n > PIXEL_BUDGET.perCall) {
-      return `set_pixels is limited to ${PIXEL_BUDGET.perCall} pixels per call (got ${n}). It is for small fixes; guide the artist instead of painting for them.`;
-    }
-    if (this.turnPixels + n > PIXEL_BUDGET.perTurn) {
-      return `The pixel budget for this reply is used up (${PIXEL_BUDGET.perTurn} pixels). Describe the remaining changes so the artist can make them.`;
-    }
-    return undefined;
+  /** Painting on the AI Draft layer is only allowed once the artist has approved draft mode. */
+  private checkDraftLock(def: ToolDef, args: Record<string, unknown>): string | undefined {
+    if (def.name !== "set_pixels" || !isDraftLayer(args.layer) || this.draftMode) return undefined;
+    return "The AI Draft layer is locked. Offer guidance first; only if the artist insists, call request_draft_mode with their words.";
   }
 
   private askApproval(summary: string, sprite: unknown): Promise<boolean> {
@@ -158,7 +144,6 @@ export class Session {
       return;
     }
     this.busy = true;
-    this.turnPixels = 0;
     const adapter = this.adapter!;
     const current = () => this.adapter === adapter;
     try {
