@@ -1,8 +1,9 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Adapter, AdapterFactory } from "./adapters/Adapter.js";
 import { PROTOCOL_VERSION, parseExtensionMessage, type BridgeMessage } from "./protocol.js";
 import { ToolBroker } from "./toolBroker.js";
-import { toolDef } from "./tools/definitions.js";
+import { PIXEL_BUDGET, isDraftLayer } from "./tools/constants.js";
+import { toolDef, type ToolDef } from "./tools/definitions.js";
 import type { ToolHost } from "./toolTypes.js";
 
 export interface SessionDeps {
@@ -26,6 +27,10 @@ export class Session {
   private busy = false;
   private adapter?: Adapter;
   private broker: ToolBroker;
+  private autoApprove = false;
+  private draftMode = false;
+  private turnPixels = 0;
+  private approvals = new Map<string, (approved: boolean) => void>();
 
   constructor(private deps: SessionDeps) {
     this.broker = new ToolBroker(deps.send, { timeoutMs: deps.toolTimeoutMs ?? 30_000 });
@@ -33,14 +38,54 @@ export class Session {
 
   /** Tools for one adapter. Once that adapter is replaced (New chat), its late calls fail silently. */
   private toolsFor(owner: () => Adapter | undefined): ToolHost {
+    const stale = () => this.adapter !== owner();
     return {
-      call: (name, args) => {
-        if (this.adapter !== owner()) return Promise.resolve({ ok: false, error: "Chat reset" });
+      call: async (name, args) => {
+        if (stale()) return { ok: false, error: "Chat reset" };
         const def = toolDef(name);
-        this.deps.send({ type: "tool_activity", summary: def ? def.activity(args) : `Used ${name}` });
-        return this.broker.call(name, args);
+        if (!def) return { ok: false, error: `Unknown tool: ${name}` };
+        if (def.kind === "edit") {
+          const rejection = this.checkBudget(def, args);
+          if (rejection) return { ok: false, error: rejection };
+          if (def.alwaysAsk || !this.autoApprove) {
+            const approved = await this.askApproval(def.summarize!(args), args.sprite);
+            if (stale()) return { ok: false, error: "Chat reset" };
+            if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
+          }
+          if (def.name === "request_draft_mode") this.draftMode = true;
+          if (def.name === "set_pixels" && !isDraftLayer(args.layer)) this.turnPixels += (args.pixels as unknown[]).length;
+        }
+        this.deps.send({ type: "tool_activity", summary: def.activity(args) });
+        const fwd = def.forward ? def.forward(args) : { name, args };
+        return this.broker.call(fwd.name, fwd.args);
       },
     };
+  }
+
+  /** Returns a rejection message when a set_pixels call breaks the budget or draft rules. */
+  private checkBudget(def: ToolDef, args: Record<string, unknown>): string | undefined {
+    if (def.name !== "set_pixels") return undefined;
+    const n = (args.pixels as unknown[]).length;
+    if (isDraftLayer(args.layer)) {
+      return this.draftMode
+        ? undefined
+        : "The AI Draft layer is locked. Offer guidance first; only if the artist insists, call request_draft_mode with their words.";
+    }
+    if (n > PIXEL_BUDGET.perCall) {
+      return `set_pixels is limited to ${PIXEL_BUDGET.perCall} pixels per call (got ${n}). It is for small fixes; guide the artist instead of painting for them.`;
+    }
+    if (this.turnPixels + n > PIXEL_BUDGET.perTurn) {
+      return `The pixel budget for this reply is used up (${PIXEL_BUDGET.perTurn} pixels). Describe the remaining changes so the artist can make them.`;
+    }
+    return undefined;
+  }
+
+  private askApproval(summary: string, sprite: unknown): Promise<boolean> {
+    const approvalId = randomUUID();
+    return new Promise((resolve) => {
+      this.approvals.set(approvalId, resolve);
+      this.deps.send({ type: "approval_request", approvalId, summary, ...(typeof sprite === "string" ? { sprite } : {}) });
+    });
   }
 
   async handleRaw(raw: string): Promise<void> {
@@ -72,6 +117,16 @@ export class Session {
         this.cancel("Chat reset");
         this.adapter = this.newAdapter();
         this.busy = false;
+        this.draftMode = false;
+        return;
+      case "approval": {
+        const resolve = this.approvals.get(msg.approvalId);
+        this.approvals.delete(msg.approvalId);
+        resolve?.(msg.approved);
+        return;
+      }
+      case "set_auto_approve":
+        this.autoApprove = msg.enabled;
         return;
       case "tool_result":
         this.broker.resolve(msg.callId, msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error ?? "Unknown tool error" });
@@ -85,8 +140,11 @@ export class Session {
 
   private cancel(reason: string): void {
     this.adapter?.cancel();
+    for (const resolve of this.approvals.values()) resolve(false);
+    this.approvals.clear();
     this.broker.cancelAll(reason);
   }
+
 
   private newAdapter(): Adapter {
     let adapter: Adapter | undefined;
@@ -100,6 +158,7 @@ export class Session {
       return;
     }
     this.busy = true;
+    this.turnPixels = 0;
     const adapter = this.adapter!;
     const current = () => this.adapter === adapter;
     try {

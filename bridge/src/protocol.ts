@@ -14,7 +14,10 @@ const ToolResultMsg = z.object({
   error: z.string().optional(),
 });
 
-export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg]);
+const Approval = z.object({ type: z.literal("approval"), approvalId: z.string(), approved: z.boolean() });
+const SetAutoApprove = z.object({ type: z.literal("set_auto_approve"), enabled: z.boolean() });
+
+export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove]);
 export type ExtensionMessage = z.infer<typeof ExtensionMessage>;
 
 export type BridgeMessage =
@@ -23,7 +26,8 @@ export type BridgeMessage =
   | { type: "tool_activity"; summary: string }
   | { type: "tool_call"; callId: string; name: string; args: Record<string, unknown> }
   | { type: "turn_done" }
-  | { type: "error"; message: string; hint?: string };
+  | { type: "error"; message: string; hint?: string }
+  | { type: "approval_request"; approvalId: string; summary: string; sprite?: string };
 
 export type ParseResult = { ok: true; message: ExtensionMessage } | { ok: false; error: string };
 
