@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterEvent } from "../src/adapters/Adapter.js";
 import { ClaudeCodeAdapter, classifyError, createSdkMapper, makeToolHandler } from "../src/adapters/claudeCode.js";
-import { toolDef } from "../src/tools/definitions.js";
+import { TOOL_DEFS, toolDef } from "../src/tools/definitions.js";
 
 const delta = (text: string, parent: string | null = null) => ({
   type: "stream_event",
@@ -75,12 +75,7 @@ describe("ClaudeCodeAdapter", () => {
     expect(o.tools).toEqual([]);
     expect(o.settingSources).toEqual([]);
     expect(o.includePartialMessages).toBe(true);
-    expect([...o.allowedTools].sort()).toEqual([
-      "mcp__aseprite__get_palette",
-      "mcp__aseprite__get_pixels",
-      "mcp__aseprite__get_snapshot",
-      "mcp__aseprite__get_sprite_info",
-    ]);
+    expect([...o.allowedTools].sort()).toEqual(TOOL_DEFS.map((d) => `mcp__aseprite__${d.name}`).sort());
     expect(Object.keys(o.mcpServers)).toEqual(["aseprite"]);
   });
 

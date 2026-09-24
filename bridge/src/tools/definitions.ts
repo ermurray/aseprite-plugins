@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { DRAFT_LAYER, NOTES_LAYER } from "./constants.js";
+import { colorRamp } from "./ramp.js";
 
 export type ToolKind = "read" | "edit";
 
@@ -8,6 +10,12 @@ export interface ToolDef {
   kind: ToolKind;
   shape: z.ZodRawShape;
   activity(args: Record<string, unknown>): string;
+  /** Edit tools only: one plain-ASCII line shown on the approval card. */
+  summarize?(args: Record<string, unknown>): string;
+  /** The tool name and args actually sent to the extension. Defaults to this tool's own. */
+  forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
+  /** Edit tools that must show an approval card even when auto-approve is on. */
+  alwaysAsk?: boolean;
 }
 
 const spriteArg = z
@@ -23,6 +31,12 @@ function rect(max?: number) {
 }
 
 const spriteName = (a: Record<string, unknown>) => (typeof a.sprite === "string" ? a.sprite : "the active sprite");
+
+const hexColor = z.string().regex(/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, "use #rrggbb or #rrggbbaa");
+const target = (a: Record<string, unknown>) => (typeof a.layer === "string" ? `${spriteName(a)} > "${a.layer}"` : spriteName(a));
+const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const frameRange = z.object({ from: z.number().int().min(1), to: z.number().int().min(1) });
 
 export const TOOL_DEFS: ToolDef[] = [
   {
@@ -69,6 +83,233 @@ export const TOOL_DEFS: ToolDef[] = [
     description: "List the sprite's palette as hex colors in index order (index 0 first), plus the transparent index for indexed sprites.",
     shape: { sprite: spriteArg },
     activity: (a) => `Read the palette of ${spriteName(a)}`,
+  },
+  {
+    name: "list_open_sprites",
+    kind: "read",
+    description:
+      "List the tabs open in Aseprite: name, path, size, frames, whether it is the active tab, and kind: 'sprite' (editable .aseprite file) or 'reference' (an image like .png/.jpg opened as a tab; read-only reference material). Use references for comparison, proportions and color picking.",
+    shape: {},
+    activity: () => "Listed open tabs",
+  },
+  {
+    name: "analyze_colors",
+    kind: "read",
+    description:
+      "Color statistics for one frame (flattened): unique color count, the most used colors with pixel counts, near-duplicate color pairs (candidates to merge), and palette entries not used in the frame.",
+    shape: { sprite: spriteArg, frame: frameArg },
+    activity: (a) => `Analyzed colors in ${spriteName(a)}`,
+  },
+  {
+    name: "set_palette",
+    kind: "edit",
+    description: "Replace the whole palette. In indexed sprites pixels keep their indices, so their colors change.",
+    shape: { sprite: spriteArg, colors: z.array(hexColor).min(1).max(256) },
+    activity: (a) => `Replaced the palette of ${spriteName(a)}`,
+    summarize: (a) => `Replace the palette of ${spriteName(a)} with ${plural(len(a.colors), "color")}`,
+  },
+  {
+    name: "add_palette_colors",
+    kind: "edit",
+    description: "Append colors to the palette (colors already present are skipped).",
+    shape: { sprite: spriteArg, colors: z.array(hexColor).min(1).max(64) },
+    activity: (a) => `Added colors to the palette of ${spriteName(a)}`,
+    summarize: (a) => `Add ${(Array.isArray(a.colors) ? a.colors : []).join(" ")} to the palette of ${spriteName(a)}`,
+  },
+  {
+    name: "add_color_ramp",
+    kind: "edit",
+    description:
+      "Build a hue-shifted ramp (dark to light) around a base color and append it to the palette. hueShift rotates highlights by +degrees and shadows by -degrees; spread (0.2-1) sets how close the ends get to black and white.",
+    shape: {
+      sprite: spriteArg,
+      base: hexColor,
+      steps: z.number().int().min(3).max(9),
+      hueShift: z.number().min(-60).max(60).optional(),
+      spread: z.number().min(0.2).max(1).optional(),
+    },
+    activity: (a) => `Added a ${a.steps}-step ramp to ${spriteName(a)}`,
+    summarize: (a) => {
+      const colors = colorRamp(a.base as string, a.steps as number, a.hueShift as number | undefined, a.spread as number | undefined);
+      return `Add a ${a.steps}-step ramp to the palette of ${spriteName(a)}: ${colors.join(" ")}`;
+    },
+    forward: (a) => ({
+      name: "add_palette_colors",
+      args: {
+        sprite: a.sprite,
+        colors: colorRamp(a.base as string, a.steps as number, a.hueShift as number | undefined, a.spread as number | undefined),
+      },
+    }),
+  },
+  {
+    name: "replace_color",
+    kind: "edit",
+    description:
+      "Replace one color with another across a layer (or all editable layers), a frame range (default all frames) and an optional region. tolerance (0-255, default 0) also matches colors whose channels differ by at most that much.",
+    shape: {
+      sprite: spriteArg,
+      from: hexColor,
+      to: hexColor,
+      tolerance: z.number().int().min(0).max(255).optional(),
+      layer: z.string().optional(),
+      frames: frameRange.optional(),
+      region: rect().optional(),
+    },
+    activity: (a) => `Replaced ${a.from} with ${a.to} in ${target(a)}`,
+    summarize: (a) => {
+      let s = `Replace ${a.from} with ${a.to} in ${target(a)}`;
+      const f = a.frames as { from: number; to: number } | undefined;
+      if (f) s += `, frames ${f.from}-${f.to}`;
+      if (a.region) s += " (region only)";
+      if (typeof a.tolerance === "number" && a.tolerance > 0) s += `, tolerance ${a.tolerance}`;
+      return s;
+    },
+  },
+  {
+    name: "layer_ops",
+    kind: "edit",
+    description:
+      "Layer housekeeping. action: 'add' (name, optional toIndex), 'rename' (layer, name), 'set' (layer + any of visible, opacity 0-255, blendMode), 'move' (layer, toIndex; 1 = bottom of its group).",
+    shape: {
+      sprite: spriteArg,
+      action: z.enum(["add", "rename", "set", "move"]),
+      layer: z.string().optional(),
+      name: z.string().min(1).optional(),
+      visible: z.boolean().optional(),
+      opacity: z.number().int().min(0).max(255).optional(),
+      blendMode: z
+        .enum(["normal", "multiply", "screen", "overlay", "darken", "lighten", "color_dodge", "color_burn", "hard_light",
+          "soft_light", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "addition", "subtract", "divide"])
+        .optional(),
+      toIndex: z.number().int().min(1).optional(),
+    },
+    activity: (a) => `Layer ${a.action} in ${spriteName(a)}`,
+    summarize: (a) => {
+      switch (a.action) {
+        case "add":
+          return `Add layer "${a.name}" to ${spriteName(a)}`;
+        case "rename":
+          return `Rename layer "${a.layer}" to "${a.name}" in ${spriteName(a)}`;
+        case "move":
+          return `Move layer "${a.layer}" to position ${a.toIndex} in ${spriteName(a)}`;
+        default: {
+          const parts: string[] = [];
+          if (typeof a.visible === "boolean") parts.push(a.visible ? "show" : "hide");
+          if (typeof a.opacity === "number") parts.push(`opacity ${a.opacity}`);
+          if (typeof a.blendMode === "string") parts.push(`blend ${a.blendMode}`);
+          return `Set layer "${a.layer}" in ${spriteName(a)}: ${parts.join(", ") || "no changes"}`;
+        }
+      }
+    },
+  },
+  {
+    name: "frame_ops",
+    kind: "edit",
+    description:
+      "Frame housekeeping. action: 'add_empty' (after frame, default last), 'duplicate' (frame), 'set_duration' (frame..toFrame, durationMs), 'add_tag' (name, frame..toFrame).",
+    shape: {
+      sprite: spriteArg,
+      action: z.enum(["add_empty", "duplicate", "set_duration", "add_tag"]),
+      frame: z.number().int().min(1).optional(),
+      toFrame: z.number().int().min(1).optional(),
+      durationMs: z.number().int().min(1).max(65535).optional(),
+      name: z.string().min(1).optional(),
+    },
+    activity: (a) => `Frame ${a.action} in ${spriteName(a)}`,
+    summarize: (a) => {
+      const range = a.toFrame ? `frames ${a.frame}-${a.toFrame}` : `frame ${a.frame ?? "(last)"}`;
+      switch (a.action) {
+        case "add_empty":
+          return `Add an empty frame after ${range} in ${spriteName(a)}`;
+        case "duplicate":
+          return `Duplicate ${range} in ${spriteName(a)}`;
+        case "set_duration":
+          return `Set ${range} of ${spriteName(a)} to ${a.durationMs} ms`;
+        default:
+          return `Tag ${range} of ${spriteName(a)} as "${a.name}"`;
+      }
+    },
+  },
+  {
+    name: "set_pixels",
+    kind: "edit",
+    description: `Set individual pixels on a layer for small fixes (stray pixels, jaggies, anti-aliasing, a highlight). color '.' erases. Limited to 256 pixels per call and 1024 per reply; it is not for painting artwork. Painting on the "${DRAFT_LAYER}" layer is only possible after request_draft_mode was approved.`,
+    shape: {
+      sprite: spriteArg,
+      layer: z.string(),
+      frame: frameArg,
+      pixels: z
+        .array(z.object({ x: z.number().int().min(0), y: z.number().int().min(0), color: z.union([hexColor, z.literal(".")]) }))
+        .min(1)
+        .max(4096),
+    },
+    activity: (a) => `Set ${plural(len(a.pixels), "pixel")} on ${target(a)}`,
+    summarize: (a) => {
+      let s = `Set ${plural(len(a.pixels), "pixel")} on ${target(a)}`;
+      if (typeof a.frame === "number") s += `, frame ${a.frame}`;
+      return s;
+    },
+  },
+  {
+    name: "annotate",
+    kind: "edit",
+    description: `Draw teaching marks (dot, line, arrow, rect, circle) on the "${NOTES_LAYER}" layer, created on top if missing. Use this to show the artist where to look instead of painting for them. clear: true wipes the notes on that frame first. Marks have no text; refer to them by position in your reply.`,
+    shape: {
+      sprite: spriteArg,
+      frame: frameArg,
+      clear: z.boolean().optional(),
+      color: hexColor.optional(),
+      shapes: z
+        .array(
+          z.object({
+            type: z.enum(["dot", "line", "arrow", "rect", "circle"]),
+            x: z.number().int(),
+            y: z.number().int(),
+            x2: z.number().int().optional(),
+            y2: z.number().int().optional(),
+            w: z.number().int().min(1).optional(),
+            h: z.number().int().min(1).optional(),
+            r: z.number().int().min(0).optional(),
+          }),
+        )
+        .max(50),
+    },
+    activity: (a) => `Drew notes on ${spriteName(a)}`,
+    summarize: (a) => {
+      const n = len(a.shapes);
+      return `${a.clear ? "Clear and draw" : "Draw"} ${plural(n, "note mark")} on ${spriteName(a)} ("${NOTES_LAYER}" layer)`;
+    },
+  },
+  {
+    name: "transform",
+    kind: "edit",
+    description:
+      "Apply a pixel operation to one layer in one frame. action: 'outline' (1px outline in color, place 'outside' (default) or 'inside'), 'flip_horizontal', 'flip_vertical' (optionally only within region).",
+    shape: {
+      sprite: spriteArg,
+      layer: z.string(),
+      frame: frameArg,
+      action: z.enum(["outline", "flip_horizontal", "flip_vertical"]),
+      color: hexColor.optional(),
+      place: z.enum(["outside", "inside"]).optional(),
+      region: rect().optional(),
+    },
+    activity: (a) => `Applied ${a.action} to ${target(a)}`,
+    summarize: (a) =>
+      a.action === "outline"
+        ? `Outline ${target(a)} ${a.place ?? "outside"} in ${a.color ?? "#000000"}`
+        : `${a.action === "flip_horizontal" ? "Flip horizontally" : "Flip vertically"}: ${target(a)}${a.region ? " (region only)" : ""}`,
+  },
+  {
+    name: "request_draft_mode",
+    kind: "edit",
+    alwaysAsk: true,
+    description: `Only after the artist has insisted on you blocking something out, even after you offered to guide them: ask to unlock a rough "${DRAFT_LAYER}" layer (40% opacity) that set_pixels may paint on without the usual limit. quote must be the artist's own words insisting.`,
+    shape: { sprite: spriteArg, quote: z.string().min(3) },
+    activity: (a) => `Unlocked the ${DRAFT_LAYER} layer on ${spriteName(a)}`,
+    summarize: (a) =>
+      `Unlock a rough "${DRAFT_LAYER}" layer on ${spriteName(a)} (40% opacity; redraw over it, then delete it). You said: "${a.quote}"`,
+    forward: (a) => ({ name: "ensure_draft_layer", args: { sprite: a.sprite } }),
   },
 ];
 
