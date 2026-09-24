@@ -11,7 +11,7 @@ Requirements: Aseprite ≥ 1.3.18, Node ≥ 20, Claude Code installed and logged
 ```bash
 cd bridge && npm install && npm run build
 npm start                    # bridge on 127.0.0.1:47821, writes ~/.aseprite-agent/bridge.json
-scripts/dev-install.sh       # link the extension into Aseprite, then restart Aseprite
+scripts/dev-install.sh       # copy the extension into Aseprite (re-run after changes), then restart Aseprite
 ```
 
 In Aseprite, choose **Edit → Agent Chat**.
