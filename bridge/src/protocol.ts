@@ -31,6 +31,7 @@ export type BridgeMessage =
   | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string; conversationId: string; history: HistoryItem[] }
   | { type: "conversation"; conversationId: string; history: HistoryItem[] }
   | { type: "text_delta"; text: string }
+  | { type: "notice"; text: string }
   | { type: "tool_activity"; summary: string }
   | { type: "tool_call"; callId: string; name: string; args: Record<string, unknown> }
   | { type: "turn_done" }

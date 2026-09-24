@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Adapter, AdapterFactory } from "./adapters/Adapter.js";
+import { ALLOWED_COMMANDS, parseCommand } from "./commands.js";
 import { ConversationStore, HistoryRecorder, summarize, type Conversation } from "./conversations.js";
 import { PROTOCOL_VERSION, parseExtensionMessage, type BridgeMessage } from "./protocol.js";
 import { ToolBroker } from "./toolBroker.js";
@@ -114,10 +115,7 @@ export class Session {
         this.cancel("Cancelled by user");
         return;
       case "new_chat":
-        this.cancel("Chat reset");
-        this.useConversation(this.newConversation());
-        this.busy = false;
-        this.deps.send({ type: "conversation", conversationId: this.conv.id, history: this.conv.items });
+        this.startNewChat();
         return;
       case "approval": {
         const resolve = this.approvals.get(msg.approvalId);
@@ -150,6 +148,13 @@ export class Session {
   }
 
 
+  private startNewChat(): void {
+    this.cancel("Chat reset");
+    this.useConversation(this.newConversation());
+    this.busy = false;
+    this.deps.send({ type: "conversation", conversationId: this.conv.id, history: this.conv.items });
+  }
+
   private newConversation(): Conversation {
     return (this.deps.store ?? new ConversationStore("")).create();
   }
@@ -175,6 +180,7 @@ export class Session {
     else if (m.type === "tool_activity") this.history.activity(m.summary);
     else if (m.type === "approval_request") this.history.approval(m.approvalId, m.summary);
     else if (m.type === "error") this.history.error(m.message, m.hint);
+    else if (m.type === "notice") this.history.notice(m.text);
     this.deps.send(m);
   }
 
@@ -194,6 +200,12 @@ export class Session {
       this.deps.send({ type: "error", message: "Still working on the previous message. Press Stop or wait for it to finish." });
       return;
     }
+    const cmd = parseCommand(text);
+    if (cmd?.name === "clear") {
+      this.startNewChat();
+      this.deps.send({ type: "turn_done" });
+      return;
+    }
     this.busy = true;
     const adapter = this.adapter!;
     const conv = this.conv;
@@ -201,8 +213,13 @@ export class Session {
     this.history.user(text);
     await this.persist(conv, adapter);
     try {
-      const note = `[AI drafts: ${this.draftMode ? "on" : "off"}]`;
-      for await (const ev of adapter.send(`${note}\n${text}`)) if (current()) this.emit(ev);
+      if (cmd && !ALLOWED_COMMANDS.has(cmd.name)) {
+        this.emit({ type: "error", message: `/${cmd.name} isn't available in Aseprite.`, hint: "Try /compact, /context, /usage, /model, /effort, /recap or /clear." });
+        return;
+      }
+      // Slash commands go to Claude Code untouched; other messages carry the drafts switch.
+      const prompt = cmd ? cmd.raw : `[AI drafts: ${this.draftMode ? "on" : "off"}]\n${text}`;
+      for await (const ev of adapter.send(prompt)) if (current()) this.emit(ev);
     } catch (e) {
       if (current()) this.emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {

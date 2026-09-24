@@ -7,7 +7,7 @@ export type ApprovalState = "pending" | "applied" | "denied" | "cancelled";
 
 /** One entry of what the chat window shows; mirrors the extension's ChatModel items. */
 export type HistoryItem =
-  | { kind: "user" | "agent" | "activity" | "error"; text: string }
+  | { kind: "user" | "agent" | "activity" | "error" | "notice"; text: string }
   | { kind: "approval"; id: string; text: string; state: ApprovalState };
 
 export interface Conversation {
@@ -72,6 +72,11 @@ export class HistoryRecorder {
 
   activity(text: string): void {
     this.items.push({ kind: "activity", text });
+    this.streaming = false;
+  }
+
+  notice(text: string): void {
+    this.items.push({ kind: "notice", text });
     this.streaming = false;
   }
 

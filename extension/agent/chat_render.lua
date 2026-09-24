@@ -58,7 +58,7 @@ local PUNCT = {
 }
 
 function R.displayText(s)
-  s = s:gsub("%*%*", ""):gsub("[\t\r\f\v]", " ")
+  s = s:gsub("%*%*", ""):gsub("[\t\r\f\v]", " "):gsub("[%z\1-\8\14-\31\127]", "")
   local ok, out = pcall(function()
     local parts = {}
     for _, code in utf8.codes(s) do

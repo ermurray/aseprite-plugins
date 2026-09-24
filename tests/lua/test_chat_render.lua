@@ -100,3 +100,12 @@ T.test("layout wraps the display text, so an en dash can't pack two lines into o
   local lay = R.layout(items, { width = 4, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" })
   T.deepEq({ lay.lines[2].text, lay.lines[3].text, lay.lines[4].text }, { "aaaa", "3-4", "bbbb" })
 end)
+
+T.test("notices render as a single gray line block without a label", function()
+  local lay = R.layout({ { kind = "notice", text = "Context 12% used" } }, { width = 40, measure = chars, lineHeight = 10, gap = 5 })
+  T.deepEq(lay.lines, { { text = "Context 12% used", kind = "notice", y = 0 } })
+end)
+
+T.test("displayText drops other control characters", function()
+  T.eq(R.displayText("a\27[1mb\0c\127d"), "a[1mbcd")
+end)

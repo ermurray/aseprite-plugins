@@ -27,6 +27,18 @@ function ChatModel:addActivity(summary)
   self.streaming = false
 end
 
+function ChatModel:addNotice(text)
+  self.items[#self.items + 1] = { kind = "notice", text = text }
+  self.streaming = false
+end
+
+-- Status-bar hint for bridge events that happen while the chat window is hidden.
+function ChatModel.hiddenTip(messageType, agentLabel)
+  if messageType == "approval_request" then return agentLabel .. " is waiting for your approval - open Agent Chat" end
+  if messageType == "turn_done" then return agentLabel .. " replied - open Agent Chat to read it" end
+  return nil
+end
+
 function ChatModel:addError(message, hint)
   local text = message
   if hint and hint ~= "" then text = text .. "\n" .. hint end

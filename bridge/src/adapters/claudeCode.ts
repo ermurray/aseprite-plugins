@@ -22,6 +22,8 @@ export function makeToolHandler(def: ToolDef, tools: ToolHost, snapshotDir: stri
   return async (args: Record<string, unknown>): Promise<McpToolResult> => toMcpResult(await tools.call(def.name, args), snapshotDir);
 }
 
+const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+
 /** Maps Agent SDK messages to adapter events. Stateful: remembers whether text has been emitted this turn. */
 export function createSdkMapper() {
   let emittedText = false;
@@ -34,6 +36,14 @@ export function createSdkMapper() {
         emittedText = true;
         return { type: "text_delta", text: ev.delta.text };
       }
+      return undefined;
+    }
+    if (msg?.type === "system") {
+      if (msg.subtype === "local_command_output" && typeof msg.content === "string") return { type: "notice", text: stripAnsi(msg.content) };
+      if (msg.subtype === "informational" && msg.level !== "info" && typeof msg.content === "string") {
+        return { type: "notice", text: stripAnsi(msg.content) };
+      }
+      if (msg.subtype === "compact_boundary") return { type: "notice", text: "Chat compacted to free up context." };
       return undefined;
     }
     if (msg?.type === "result" && msg.subtype !== "success") {

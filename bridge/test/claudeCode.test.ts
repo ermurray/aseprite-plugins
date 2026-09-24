@@ -52,6 +52,22 @@ describe("createSdkMapper", () => {
   });
 });
 
+describe("command output", () => {
+  it("shows slash-command output, notices and compaction as notices, without ANSI codes", () => {
+    const map = createSdkMapper();
+    expect(map({ type: "system", subtype: "local_command_output", content: "\u001b[1mContext\u001b[0m 12% used" })).toEqual({
+      type: "notice",
+      text: "Context 12% used",
+    });
+    expect(map({ type: "system", subtype: "informational", level: "notice", content: "Model set to sonnet" })).toEqual({
+      type: "notice",
+      text: "Model set to sonnet",
+    });
+    expect(map({ type: "system", subtype: "informational", level: "info", content: "debug chatter" })).toBeUndefined();
+    expect(map({ type: "system", subtype: "compact_boundary" })).toEqual({ type: "notice", text: "Chat compacted to free up context." });
+  });
+});
+
 describe("classifyError", () => {
   it("explains a missing CLI", () => {
     expect(classifyError(new Error("spawn claude ENOENT"))).toMatchObject({ hint: expect.stringContaining("claude") });

@@ -1,6 +1,9 @@
 import type { ToolHost } from "../toolTypes.js";
 
-export type AdapterEvent = { type: "text_delta"; text: string } | { type: "error"; message: string; hint?: string };
+export type AdapterEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "notice"; text: string }
+  | { type: "error"; message: string; hint?: string };
 
 export type ResumeState = Record<string, unknown>;
 

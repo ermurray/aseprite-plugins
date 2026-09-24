@@ -18,6 +18,7 @@ local COLORS = {
   agent_label = Color{ r = 120, g = 200, b = 140 },
   activity = Color{ r = 140, g = 140, b = 140 },
   thinking = Color{ r = 140, g = 140, b = 140 },
+  notice = Color{ r = 140, g = 140, b = 140 },
   approval_label = Color{ r = 240, g = 180, b = 80 },
   approval_state = Color{ r = 140, g = 140, b = 140 },
   error = Color{ r = 230, g = 90, b = 80 },
@@ -241,6 +242,10 @@ function ChatWindow:onStatus(status, detail)
 end
 
 function ChatWindow:onMessage(m)
+  if not self.open then
+    local tip = ChatModel.hiddenTip(m.type, self.agentLabel)
+    if tip then pcall(app.tip, tip, 8) end
+  end
   if m.type == "ready" or m.type == "conversation" then
     -- The bridge's saved conversation is the source of truth after (re)connecting or New chat.
     self.opts.prefs.conversationId = m.conversationId
@@ -260,6 +265,8 @@ function ChatWindow:onMessage(m)
     self.model:appendAgent(m.text)
   elseif m.type == "tool_activity" then
     self.model:addActivity(m.summary)
+  elseif m.type == "notice" then
+    self.model:addNotice(m.text)
   elseif m.type == "tool_call" then
     local res = tools.dispatch(m.name, m.args)
     self.conn:send{ type = "tool_result", callId = m.callId, ok = res.ok, data = res.data, error = res.error }

@@ -110,3 +110,17 @@ T.test("loadHistory replaces the chat with saved items (json userdata) and cance
   m:loadHistory(json.decode("[]"))
   T.eq(#m.items, 0)
 end)
+
+T.test("notices are their own items and break agent streaming", function()
+  local m = ChatModel.new()
+  m:appendAgent("a")
+  m:addNotice("Context 12% used")
+  m:appendAgent("b")
+  T.deepEq(m.items, { { kind = "agent", text = "a" }, { kind = "notice", text = "Context 12% used" }, { kind = "agent", text = "b" } })
+end)
+
+T.test("hiddenTip: what to show in the status bar while the window is hidden", function()
+  T.eq(ChatModel.hiddenTip("approval_request", "Claude"), "Claude is waiting for your approval - open Agent Chat")
+  T.eq(ChatModel.hiddenTip("turn_done", "Claude"), "Claude replied - open Agent Chat to read it")
+  T.eq(ChatModel.hiddenTip("text_delta", "Claude"), nil)
+end)

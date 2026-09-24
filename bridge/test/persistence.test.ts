@@ -88,4 +88,47 @@ describe("conversation persistence", () => {
     expect(contexts.at(-1)!.resume).toBeUndefined();
     expect((await store.load(ready.conversationId))?.items).toHaveLength(2);
   });
+
+  it("passes allowed slash commands through untouched, maps /clear to New chat, and refuses others", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    const seen: string[] = [];
+    server = await startServer({
+      port: 0,
+      token: "t",
+      systemPrompt: "",
+      snapshotDir: "/s",
+      store,
+      adapterFactory: () => ({
+        name: "fake",
+        async *send(text: string): AsyncIterable<AdapterEvent> {
+          seen.push(text);
+          yield { type: "notice", text: "Context 12% used" };
+        },
+        cancel() {},
+        resumeState: () => undefined,
+      }),
+    });
+    const { c, ready } = await hello(server.port);
+    const turn = async (text: string) => {
+      const before = c.received.length;
+      c.send({ type: "user_message", text });
+      await c.waitFor((m) => m.type === "turn_done" && c.received.indexOf(m) >= before);
+      return c.received.slice(before);
+    };
+    const ctx = await turn("/context");
+    expect(seen).toEqual(["/context"]);
+    expect(ctx).toContainEqual({ type: "notice", text: "Context 12% used" });
+
+    const refused = await turn("/design something");
+    expect(seen).toHaveLength(1);
+    expect(refused).toContainEqual({ type: "error", message: "/design isn't available in Aseprite.", hint: "Try /compact, /context, /usage, /model, /effort, /recap or /clear." });
+
+    const cleared = await turn("/clear");
+    expect(seen).toHaveLength(1);
+    const conv = cleared.find((m) => m.type === "conversation") as any;
+    expect(conv.conversationId).not.toBe(ready.conversationId);
+
+    const saved = await store.load(ready.conversationId);
+    expect(saved?.items).toContainEqual({ kind: "notice", text: "Context 12% used" });
+  });
 });
