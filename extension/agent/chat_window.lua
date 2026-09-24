@@ -244,6 +244,7 @@ function ChatWindow:onMessage(m)
     inspect.snapshotDir = m.snapshotDir
     self.agentLabel = (m.adapter == "claude-code") and "Claude" or tostring(m.adapter)
     self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
+    self.conn:send{ type = "set_draft_mode", enabled = self.opts.prefs.allowDrafts == true }
   elseif m.type == "approval_request" then
     self.model:addApproval(m.approvalId, m.summary)
     self:syncButtons()
