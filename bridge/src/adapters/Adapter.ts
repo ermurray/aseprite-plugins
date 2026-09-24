@@ -1,6 +1,9 @@
 import type { ToolHost } from "../toolTypes.js";
 
-export type AdapterEvent = { type: "text_delta"; text: string } | { type: "error"; message: string; hint?: string };
+export type AdapterEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "notice"; text: string }
+  | { type: "error"; message: string; hint?: string };
 
 export type ResumeState = Record<string, unknown>;
 
@@ -16,6 +19,8 @@ export interface AdapterContext {
   tools: ToolHost;
   systemPrompt: string;
   resume?: ResumeState;
+  /** Plain-text recap of the saved chat, for adapters that must start fresh when resume fails. */
+  resumeSummary?: string;
 }
 
 export type AdapterFactory = (ctx: AdapterContext) => Adapter;

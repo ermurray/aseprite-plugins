@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterEvent } from "../src/adapters/Adapter.js";
 import { ClaudeCodeAdapter, classifyError, createSdkMapper, makeToolHandler } from "../src/adapters/claudeCode.js";
-import { toolDef } from "../src/tools/definitions.js";
+import { TOOL_DEFS, toolDef } from "../src/tools/definitions.js";
 
 const delta = (text: string, parent: string | null = null) => ({
   type: "stream_event",
@@ -52,6 +52,22 @@ describe("createSdkMapper", () => {
   });
 });
 
+describe("command output", () => {
+  it("shows slash-command output, notices and compaction as notices, without ANSI codes", () => {
+    const map = createSdkMapper();
+    expect(map({ type: "system", subtype: "local_command_output", content: "\u001b[1mContext\u001b[0m 12% used" })).toEqual({
+      type: "notice",
+      text: "Context 12% used",
+    });
+    expect(map({ type: "system", subtype: "informational", level: "notice", content: "Model set to sonnet" })).toEqual({
+      type: "notice",
+      text: "Model set to sonnet",
+    });
+    expect(map({ type: "system", subtype: "informational", level: "info", content: "debug chatter" })).toBeUndefined();
+    expect(map({ type: "system", subtype: "compact_boundary" })).toEqual({ type: "notice", text: "Chat compacted to free up context." });
+  });
+});
+
 describe("classifyError", () => {
   it("explains a missing CLI", () => {
     expect(classifyError(new Error("spawn claude ENOENT"))).toMatchObject({ hint: expect.stringContaining("claude") });
@@ -75,12 +91,7 @@ describe("ClaudeCodeAdapter", () => {
     expect(o.tools).toEqual([]);
     expect(o.settingSources).toEqual([]);
     expect(o.includePartialMessages).toBe(true);
-    expect([...o.allowedTools].sort()).toEqual([
-      "mcp__aseprite__get_palette",
-      "mcp__aseprite__get_pixels",
-      "mcp__aseprite__get_snapshot",
-      "mcp__aseprite__get_sprite_info",
-    ]);
+    expect([...o.allowedTools].sort()).toEqual(TOOL_DEFS.map((d) => `mcp__aseprite__${d.name}`).sort());
     expect(Object.keys(o.mcpServers)).toEqual(["aseprite"]);
   });
 
@@ -132,6 +143,91 @@ describe("ClaudeCodeAdapter", () => {
     }
     expect(signal!.aborted).toBe(true);
     expect(out).toEqual([{ type: "text_delta", text: "a" }]);
+  });
+});
+
+describe("resume fallback", () => {
+  it("starts a fresh session seeded with the summary when the old session is gone", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        if (params.options.resume) throw new Error("No conversation found with session ID: gone");
+        yield { ...delta("hi again"), session_id: "fresh" };
+      })();
+    }) as any;
+    const a = new ClaudeCodeAdapter(
+      { tools: noTools, systemPrompt: "SP", resume: { sessionId: "gone" }, resumeSummary: "SUMMARY" },
+      { snapshotDir: "/s", queryFn: q },
+    );
+    const evs = await collect(a.send("next"));
+    expect(evs[0]).toMatchObject({ type: "error", message: "Couldn't resume Claude's earlier session." });
+    expect(evs[1]).toEqual({ type: "text_delta", text: "hi again" });
+    expect(calls[1].options.resume).toBeUndefined();
+    expect(calls[1].prompt).toBe("SUMMARY\n\nnext");
+    expect(a.resumeState()).toEqual({ sessionId: "fresh" });
+  });
+});
+
+describe("resume fallback only for a missing session", () => {
+  const resumed = (q: any, extra: object = {}) =>
+    new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP", resume: { sessionId: "old" }, resumeSummary: "SUMMARY", ...extra }, { snapshotDir: "/s", queryFn: q });
+
+  it("keeps the session and reports the error when the failure is transient", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        throw new Error("API Error: 529 overloaded");
+      })();
+    }) as any;
+    const a = resumed(q);
+    const evs = await collect(a.send("next"));
+    expect(calls).toHaveLength(1);
+    expect(evs).toEqual([{ type: "error", message: "API Error: 529 overloaded" }]);
+    expect(a.resumeState()).toEqual({ sessionId: "old" });
+  });
+
+  it("does not retry once a tool has been called (edits must not run twice)", async () => {
+    const calls: any[] = [];
+    let adapter: ClaudeCodeAdapter;
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        (adapter as any).noteToolUse();
+        throw new Error("No conversation found with session ID: old");
+      })();
+    }) as any;
+    adapter = resumed(q);
+    await collect(adapter.send("next"));
+    expect(calls).toHaveLength(1);
+  });
+
+  it("retries a slash command without the recap", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        if (params.options.resume) throw new Error("No conversation found with session ID: old");
+        yield delta("ok");
+      })();
+    }) as any;
+    await collect(resumed(q).send("/context"));
+    expect(calls[1].prompt).toBe("/context");
+  });
+
+  it("hides the SDK's intermediate error when it does fall back", async () => {
+    const q = ((params: any) =>
+      (async function* () {
+        if (params.options.resume) {
+          yield { type: "result", subtype: "error_during_execution", session_id: "old" };
+          throw new Error("Claude Code returned an error result: No conversation found with session ID: old");
+        }
+        yield delta("hi");
+      })()) as any;
+    const evs = await collect(resumed(q).send("next"));
+    expect(evs.map((e) => e.type)).toEqual(["error", "text_delta"]);
+    expect(evs[0]).toMatchObject({ message: "Couldn't resume Claude's earlier session." });
   });
 });
 

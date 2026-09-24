@@ -45,7 +45,7 @@ to other Aseprite users later without restructuring.
 Aseprite extension (Lua)                  Bridge (Node + TypeScript, local)
  ├─ Chat window (Dialog + canvas)    ⇄     ├─ WebSocket server 127.0.0.1:<port>
  ├─ WebSocket client                 WS    ├─ Session / project / transcript store
- ├─ Tool executor (sprite I/O,             ├─ Tool layer (schemas, approval, budgets)
+ ├─ Tool executor (sprite I/O,             ├─ Tool layer (schemas, approval, draft lock)
  │   transactions)                         ├─ Adapter interface
  └─ Clips UI, project setup                │    └─ ClaudeCodeAdapter (Agent SDK)
                                            └─ System prompt
@@ -53,7 +53,7 @@ Aseprite extension (Lua)                  Bridge (Node + TypeScript, local)
 
 - **Extension** = UI and sprite access only. No AI logic.
 - **Bridge** = conversation, agent adapter, tool definitions, approval gating,
-  pixel budgets, persistence. Knows Aseprite only through tool schemas.
+  draft-layer lock, persistence. Knows Aseprite only through tool schemas.
 - Chosen over (B) browser chat + tool-only extension and (C) MCP-only/terminal
   chat, because the user wants the chat inside Aseprite. The protocol keeps (B)
   cheap to add later, and the tool layer can be exposed as an MCP server later.
@@ -86,7 +86,7 @@ aseprite-plugins/
 │  ├─ src/project.ts          project.json load/defaults, paths
 │  ├─ src/transcripts.ts      JSONL conversation store
 │  ├─ src/clips.ts            clips.json index, LRU eviction, pinning
-│  ├─ src/tools/              schemas + approval summaries + budget checks
+│  ├─ src/tools/              schemas + approval summaries + draft lock
 │  ├─ src/adapters/Adapter.ts adapter interface
 │  ├─ src/adapters/claudeCode.ts
 │  └─ src/prompt.ts           system prompt
@@ -133,7 +133,6 @@ my-game-art/
   "version": 1,
   "exports": { "location": "alongside" },
   "clips": { "max": 20 },
-  "budgets": { "pixelsPerCall": 256, "pixelsPerTurn": 1024 },
   "aiDraft": { "layerName": "AI Draft", "opacity": 102 }
 }
 ```
@@ -208,9 +207,9 @@ Frames are 1-based, matching Aseprite's UI.
 | `layer_ops` | add, rename, reorder, visibility, opacity, blend mode |
 | `frame_ops` | add, duplicate, durations, tags |
 | `run_command` | Allowlist of built-in commands (e.g. Outline, Flip, color adjustments) applied to a selection/layer |
-| `set_pixels` | Subject to pixel budgets (§6) |
-| `annotate` | Circles, arrows, marks, short labels on the **"Agent Notes"** layer (created on demand, top of stack). Not budgeted. |
-| `import_from_sprite` | Region/layer/frame range from another project sprite → new layer `⤵ <sprite> / <layer>`, pixels selected. Optional flip. Not budgeted. |
+| `set_pixels` | Painting on "AI Draft" needs approved draft mode (§6) |
+| `annotate` | Circles, arrows, marks, short labels on the **"Agent Notes"** layer (created on demand, top of stack). |
+| `import_from_sprite` | Region/layer/frame range from another project sprite → new layer `⤵ <sprite> / <layer>`, pixels selected. Optional flip. |
 | `save_clip`, `insert_clip`, `delete_clip` | See §8. `insert_clip` behaves like `import_from_sprite`. |
 | `export_sprite` | PNG / GIF / sprite sheet + JSON via Aseprite's export; path from project rules (§9) |
 | `propose_memory` | Appends a line to `memory.md` |
@@ -240,21 +239,17 @@ The tool discourages generation through friction at three levels.
    assistant. On "draw/make me X" requests it pushes back once, explains why,
    and offers alternatives: construction breakdown, silhouette/proportion guide
    via `annotate`, palette, reference-style critique of the artist's first pass.
-2. **Tool level.** `set_pixels` is capped at `pixelsPerCall` (256) and
-   `pixelsPerTurn` (1024) outside the AI Draft layer. Enough for cleanup and
-   fixes; impractical for painting a sprite. Over-budget calls are rejected
-   with an explanatory error the agent relays.
+2. **Tool level.** *(Pixel budgets removed 2026-09-24 at the artist's request.)* `set_pixels` has no size limit; every call still needs approval unless auto-approve is on, and its description tells the agent it is for fixes, not painting artwork.
 3. **Quarantine.** If the artist insists after pushback, the agent may block
-   out on the **"AI Draft"** layer only: created at 40% opacity, pixel budget
-   lifted for that layer only, and the agent tells the artist to redraw over it
+   out on the **"AI Draft"** layer only: created at 40% opacity, and the agent tells the artist to redraw over it
    and delete the layer. Nothing generated lands on the artist's layers.
    Enforcement is in the bridge: a `set_pixels` call targeting "AI Draft" is
    only allowed after the conversation has recorded an explicit insistence
    (the agent must call `request_draft_mode` with the user's quote, which shows
    its own approval card).
 
-`import_from_sprite`, `insert_clip`, and `annotate` are not budgeted: they move
-the artist's own work or draw on a notes layer.
+`import_from_sprite`, `insert_clip`, and `annotate` move the artist's own work or
+draw on a notes layer.
 
 ## 7. Protocol
 
@@ -337,7 +332,7 @@ installed and logged-in `claude` CLI (subscription auth, no API key).
 - *(Exact SDK option names verified against current SDK docs during planning.)*
 
 Future adapters (API key, other vendors, local models) implement the same
-interface; approval, budgets, persistence, and tools are shared.
+interface; approval, the draft lock, persistence, and tools are shared.
 
 ## 11. Chat window UI
 
@@ -367,7 +362,6 @@ interface; approval, budgets, persistence, and tools are shared.
 | Tool timeout | 30 s, then error result |
 | `claude` missing / not logged in | `error` with hint ("Run `claude` in a terminal and log in") |
 | Sprite closed/moved | Error naming the path; agent reports it |
-| Over budget | Rejected before reaching the extension, explanatory error |
 | Stop pressed | Adapter cancelled; pending approval cards resolved as Deny |
 | Bad token | Connection closed; UI suggests restarting the bridge |
 | Resume failed | New session seeded with transcript summary; chat notes it |
@@ -375,7 +369,7 @@ interface; approval, budgets, persistence, and tools are shared.
 ## 13. Testing
 
 - **Bridge (Vitest):** protocol parsing/validation, approval gating incl.
-  auto-approve exceptions, pixel budgets and draft-mode gating, project
+  auto-approve exceptions and draft-mode gating, project
   discovery/defaults, transcript store, clip LRU/pinning/eviction, export path
   rules. Integration test: fake adapter + fake extension WS client running a
   full turn with an approval.

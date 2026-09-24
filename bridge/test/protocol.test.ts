@@ -30,4 +30,12 @@ describe("parseExtensionMessage", () => {
     const r = parseExtensionMessage(JSON.stringify({ type: "user_message", text: "" }));
     expect(r.ok).toBe(false);
   });
+  it("accepts approval and set_auto_approve", () => {
+    expect(parseExtensionMessage(JSON.stringify({ type: "approval", approvalId: "a1", approved: true })).ok).toBe(true);
+    expect(parseExtensionMessage(JSON.stringify({ type: "set_auto_approve", enabled: false })).ok).toBe(true);
+    expect(parseExtensionMessage(JSON.stringify({ type: "approval", approvalId: "a1" })).ok).toBe(false);
+  });
+  it("accepts set_draft_mode", () => {
+    expect(parseExtensionMessage(JSON.stringify({ type: "set_draft_mode", enabled: true })).ok).toBe(true);
+  });
 });

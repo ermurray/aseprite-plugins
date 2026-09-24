@@ -50,7 +50,7 @@ describe("bridge server", () => {
   it("replies ready with adapter name and snapshot dir", async () => {
     const s = await start(noop);
     const c = await authed(s.port);
-    expect(c.received[0]).toEqual({ type: "ready", adapter: "fake", protocolVersion: 1, snapshotDir: "/tmp/snaps" });
+    expect(c.received[0]).toEqual({ type: "ready", adapter: "fake", protocolVersion: 1, snapshotDir: "/tmp/snaps", conversationId: expect.any(String), history: [] });
   });
 
   it("reports malformed messages without closing", async () => {
@@ -141,7 +141,7 @@ describe("new chat during a running turn", () => {
         yield { type: "text_delta", text: "stale" };
         return;
       }
-      yield { type: "text_delta", text: `fresh:${text}` };
+      yield { type: "text_delta", text: `fresh:${text.split("\n").pop()}` };
     });
     const c = await authed(s.port);
     c.send({ type: "user_message", text: "one" });
@@ -154,6 +154,10 @@ describe("new chat during a running turn", () => {
     await c.waitFor((m) => m.type === "turn_done");
     await new Promise((r) => setTimeout(r, 50));
     const after = c.received.slice(before);
-    expect(after).toEqual([{ type: "text_delta", text: "fresh:two" }, { type: "turn_done" }]);
+    expect(after).toEqual([
+      { type: "conversation", conversationId: expect.any(String), history: [] },
+      { type: "text_delta", text: "fresh:two" },
+      { type: "turn_done" },
+    ]);
   });
 });

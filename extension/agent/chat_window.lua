@@ -18,12 +18,20 @@ local COLORS = {
   agent_label = Color{ r = 120, g = 200, b = 140 },
   activity = Color{ r = 140, g = 140, b = 140 },
   thinking = Color{ r = 140, g = 140, b = 140 },
+  notice = Color{ r = 140, g = 140, b = 140 },
+  approval_label = Color{ r = 240, g = 180, b = 80 },
+  approval_state = Color{ r = 140, g = 140, b = 140 },
   error = Color{ r = 230, g = 90, b = 80 },
 }
 
 local function themeColor(name, fallback)
   local ok, c = pcall(function() return app.theme.color[name] end)
   return (ok and c) or fallback
+end
+
+-- Status-bar message (replaceable in tests; Aseprite's app table can't be patched).
+function ChatWindow.showTip(text)
+  pcall(app.tip, text, 8)
 end
 
 function ChatWindow.new(opts)
@@ -38,8 +46,17 @@ function ChatWindow.new(opts)
     contentH = 0,
     lineH = 14,
     open = false,
+    autoApprove = false,
     tick = 0,
   }, ChatWindow)
+  self.unlockTimer = Timer{
+    interval = 0.4,
+    ontick = function()
+      self.unlockTimer:stop()
+      self.model:unlockApply()
+      self:syncButtons()
+    end,
+  }
   self.timer = Timer{
     interval = 0.12,
     ontick = function()
@@ -50,6 +67,7 @@ function ChatWindow.new(opts)
   self.conn = Connection.new{
     onMessage = function(m) self:onMessage(m) end,
     onStatus = function(s, d) self:onStatus(s, d) end,
+    conversationId = function() return self.opts.prefs.conversationId end,
   }
   return self
 end
@@ -75,6 +93,26 @@ function ChatWindow:build()
     onwheel = function(ev) self:scrollBy(ev.deltaY * 3 * self.lineH) end,
   }
   dlg:newrow()
+  dlg:button{ id = "apply", text = "Apply", visible = false, onclick = function() self:answerApproval(true) end }
+  dlg:check{
+    id = "autoapprove",
+    text = "Auto-approve edits",
+    selected = self.autoApprove,
+    onclick = function()
+      self.autoApprove = self.dlg.data.autoapprove
+      self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
+    end,
+  }
+  dlg:check{
+    id = "allowdrafts",
+    text = "Allow AI drafts",
+    selected = self.opts.prefs.allowDrafts == true,
+    onclick = function()
+      self.opts.prefs.allowDrafts = self.dlg.data.allowdrafts
+      self.conn:send{ type = "set_draft_mode", enabled = self.opts.prefs.allowDrafts }
+    end,
+  }
+  dlg:newrow()
   dlg:entry{ id = "input", hexpand = true }
   dlg:button{ id = "send", text = "Send", focus = true, onclick = function() self:onSendOrStop() end }
   self.dlg = dlg
@@ -93,14 +131,25 @@ function ChatWindow:show()
       self.dlg:show{ wait = false }
     end
     self.dlg:modify{ id = "status", text = STATUS_TEXT[self.conn.status] or self.conn.status }
-    self.dlg:modify{ id = "send", text = self.busy and "Stop" or "Send" }
+    self:syncButtons()
   end
   if self.conn.status == "disconnected" then self.conn:connect() end
+end
+
+-- Hotkey behaviour: hide if open, show if hidden. Hiding keeps the chat, the bridge
+-- connection and Claude's session, exactly like closing the window.
+function ChatWindow:toggle()
+  if self.open then
+    self.dlg:close()
+  else
+    self:show()
+  end
 end
 
 -- Full shutdown (extension unload).
 function ChatWindow:close()
   self.timer:stop()
+  self.unlockTimer:stop()
   self.conn:close()
   if self.open then self.dlg:close() end
 end
@@ -123,28 +172,54 @@ function ChatWindow:setBusy(busy)
   else
     self.timer:stop()
   end
-  if self.open then self.dlg:modify{ id = "send", text = busy and "Stop" or "Send" } end
+  self:syncButtons()
+end
+
+function ChatWindow:mainButtonText()
+  if self.model:pendingApproval() then return "Deny" end
+  return self.busy and "Stop" or "Send"
+end
+
+function ChatWindow:syncButtons()
+  if not self.open then return end
+  self.dlg:modify{ id = "send", text = self:mainButtonText() }
+  self.dlg:modify{ id = "apply", visible = self.model:applyAvailable() }
+end
+
+function ChatWindow:answerApproval(approved)
+  if approved and not self.model:applyAvailable() then return end
+  local item = self.model:answerPending(approved)
+  if not item then return end
+  self.conn:send{ type = "approval", approvalId = item.id, approved = approved }
+  if self.model.applyLocked then self.unlockTimer:start() end
+  self:syncButtons()
+  self:repaint()
 end
 
 function ChatWindow:onSendOrStop()
   local text = (self.dlg.data.input or ""):match("^%s*(.-)%s*$")
-  local action = ChatModel.sendAction(self.busy, text)
-  if action == "stop" then
+  local action = ChatModel.sendAction(self.busy, text, self.model:pendingApproval() ~= nil)
+  if action == "deny" then
+    self:answerApproval(false)
+    return
+  elseif action == "stop" then
+    self.cancelRequested = true
     self.conn:send{ type = "cancel" }
     return
   elseif action == "reject_busy" then
-    self.model:addError("Still working on the previous message.", "Wait for it to finish, or clear the box and press Stop.")
+    self.model:addLocalError("Still working on the previous message.", "Wait for it to finish, or clear the box and press Stop.")
     self:repaint()
     return
   elseif action == "ignore" then
     return
   end
   if self.conn.status ~= "connected" then
-    self.model:addError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
+    self.model:addLocalError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
     self:repaint()
     return
   end
   self.model:addUser(text)
+  self.cancelRequested = false
   self.followTail = true
   self.dlg:modify{ id = "input", text = "" }
   self.conn:send{ type = "user_message", text = text }
@@ -155,7 +230,11 @@ end
 function ChatWindow:newChat()
   if self.busy then self.conn:send{ type = "cancel" } end
   self.conn:send{ type = "new_chat" }
+  -- Forget the old conversation locally too: if this New chat never reached the bridge
+  -- (disconnected), reconnecting must not bring the old chat back.
+  self.opts.prefs.conversationId = nil
   self.model:clear()
+  self:syncButtons()
   self.scroll = 0
   self.followTail = true
   self:setBusy(false)
@@ -165,7 +244,7 @@ end
 function ChatWindow:onStatus(status, detail)
   if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT[status] or status } end
   if status == "disconnected" and self.busy then
-    self.model:addError("Lost connection to the bridge.", detail)
+    self.model:addLocalError("Lost connection to the bridge.", detail)
     self.model:endTurn()
     self:setBusy(false)
     self:repaint()
@@ -173,19 +252,40 @@ function ChatWindow:onStatus(status, detail)
 end
 
 function ChatWindow:onMessage(m)
+  if not self.open then
+    local replied = m.type == "turn_done" and not self.cancelRequested and self.model:lastTurnReplied()
+    local tip = ChatModel.hiddenTip(m.type, self.agentLabel, replied)
+    if tip then ChatWindow.showTip(tip) end
+  end
+  if m.type == "ready" or m.type == "conversation" then
+    -- The bridge's saved conversation is the source of truth after (re)connecting or New chat.
+    self.opts.prefs.conversationId = m.conversationId
+    if m.history then self.model:loadHistory(m.history, { dropLocal = m.type == "conversation" }) end
+    self.followTail = true
+    self:syncButtons()
+  end
   if m.type == "ready" then
     inspect.snapshotDir = m.snapshotDir
     self.agentLabel = (m.adapter == "claude-code") and "Claude" or tostring(m.adapter)
+    self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
+    self.conn:send{ type = "set_draft_mode", enabled = self.opts.prefs.allowDrafts == true }
+  elseif m.type == "approval_request" then
+    self.model:addApproval(m.approvalId, m.summary)
+    self:syncButtons()
   elseif m.type == "text_delta" then
     self.model:appendAgent(m.text)
   elseif m.type == "tool_activity" then
     self.model:addActivity(m.summary)
+  elseif m.type == "notice" then
+    self.model:addNotice(m.text)
   elseif m.type == "tool_call" then
     local res = tools.dispatch(m.name, m.args)
     self.conn:send{ type = "tool_result", callId = m.callId, ok = res.ok, data = res.data, error = res.error }
+    if res.ok then app.refresh() end
   elseif m.type == "turn_done" then
     self.model:endTurn()
     self:setBusy(false)
+    self:syncButtons()
   elseif m.type == "error" then
     self.model:addError(m.message, m.hint)
   end
@@ -206,7 +306,7 @@ function ChatWindow:paint(gc)
     lineHeight = self.lineH,
     gap = GAP,
     agentLabel = self.agentLabel,
-    thinking = self.busy and (self.tick // 3) or nil,
+    thinking = (self.busy and not self.model:pendingApproval()) and (self.tick // 3) or nil,
   })
   self.viewH = gc.height
   self.contentH = lay.height + 2 * PAD

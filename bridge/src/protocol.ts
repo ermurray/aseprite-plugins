@@ -1,8 +1,14 @@
 import { z } from "zod";
+import type { HistoryItem } from "./conversations.js";
 
 export const PROTOCOL_VERSION = 1;
 
-const Hello = z.object({ type: z.literal("hello"), token: z.string(), extensionVersion: z.string() });
+const Hello = z.object({
+  type: z.literal("hello"),
+  token: z.string(),
+  extensionVersion: z.string(),
+  conversationId: z.string().optional(),
+});
 const UserMessage = z.object({ type: z.literal("user_message"), text: z.string().min(1) });
 const Cancel = z.object({ type: z.literal("cancel") });
 const NewChat = z.object({ type: z.literal("new_chat") });
@@ -14,16 +20,23 @@ const ToolResultMsg = z.object({
   error: z.string().optional(),
 });
 
-export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg]);
+const Approval = z.object({ type: z.literal("approval"), approvalId: z.string(), approved: z.boolean() });
+const SetAutoApprove = z.object({ type: z.literal("set_auto_approve"), enabled: z.boolean() });
+const SetDraftMode = z.object({ type: z.literal("set_draft_mode"), enabled: z.boolean() });
+
+export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove, SetDraftMode]);
 export type ExtensionMessage = z.infer<typeof ExtensionMessage>;
 
 export type BridgeMessage =
-  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string }
+  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string; conversationId: string; history: HistoryItem[] }
+  | { type: "conversation"; conversationId: string; history: HistoryItem[] }
   | { type: "text_delta"; text: string }
+  | { type: "notice"; text: string }
   | { type: "tool_activity"; summary: string }
   | { type: "tool_call"; callId: string; name: string; args: Record<string, unknown> }
   | { type: "turn_done" }
-  | { type: "error"; message: string; hint?: string };
+  | { type: "error"; message: string; hint?: string }
+  | { type: "approval_request"; approvalId: string; summary: string; sprite?: string };
 
 export type ParseResult = { ok: true; message: ExtensionMessage } | { ok: false; error: string };
 

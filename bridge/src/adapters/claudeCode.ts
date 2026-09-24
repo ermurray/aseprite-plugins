@@ -22,6 +22,8 @@ export function makeToolHandler(def: ToolDef, tools: ToolHost, snapshotDir: stri
   return async (args: Record<string, unknown>): Promise<McpToolResult> => toMcpResult(await tools.call(def.name, args), snapshotDir);
 }
 
+const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+
 /** Maps Agent SDK messages to adapter events. Stateful: remembers whether text has been emitted this turn. */
 export function createSdkMapper() {
   let emittedText = false;
@@ -34,6 +36,14 @@ export function createSdkMapper() {
         emittedText = true;
         return { type: "text_delta", text: ev.delta.text };
       }
+      return undefined;
+    }
+    if (msg?.type === "system") {
+      if (msg.subtype === "local_command_output" && typeof msg.content === "string") return { type: "notice", text: stripAnsi(msg.content) };
+      if (msg.subtype === "informational" && msg.level !== "info" && typeof msg.content === "string") {
+        return { type: "notice", text: stripAnsi(msg.content) };
+      }
+      if (msg.subtype === "compact_boundary") return { type: "notice", text: "Chat compacted to free up context." };
       return undefined;
     }
     if (msg?.type === "result" && msg.subtype !== "success") {
@@ -59,6 +69,8 @@ export class ClaudeCodeAdapter implements Adapter {
   readonly name = "claude-code";
   private sessionId?: string;
   private abort?: AbortController;
+  private resuming: boolean;
+  private saidAnything = false;
 
   constructor(
     private ctx: AdapterContext,
@@ -66,6 +78,7 @@ export class ClaudeCodeAdapter implements Adapter {
   ) {
     const s = ctx.resume?.sessionId;
     if (typeof s === "string") this.sessionId = s;
+    this.resuming = this.sessionId !== undefined;
   }
 
   private mcpServer() {
@@ -74,12 +87,50 @@ export class ClaudeCodeAdapter implements Adapter {
       version: "0.1.0",
       tools: TOOL_DEFS.map((def) => {
         const handler = makeToolHandler(def, this.ctx.tools, this.opts.snapshotDir);
-        return tool(def.name, def.description, def.shape, async (args) => (await handler(args as Record<string, unknown>)) as any);
+        return tool(def.name, def.description, def.shape, async (args) => {
+          this.noteToolUse();
+          return (await handler(args as Record<string, unknown>)) as any;
+        });
       }),
     });
   }
 
   async *send(text: string): AsyncIterable<AdapterEvent> {
+    // A saved session can vanish (Claude Code cleans old ones up). Only when the SDK says so,
+    // and before Claude said or did anything, start a fresh session seeded with a recap.
+    const summary = this.resuming ? this.ctx.resumeSummary : undefined;
+    this.resuming = false;
+    if (summary === undefined) {
+      yield* this.attempt(text);
+      return;
+    }
+    const held: AdapterEvent[] = [];
+    let sessionMissing = false;
+    for await (const ev of this.attempt(text)) {
+      if (ev.type === "error" && !this.saidAnything) {
+        held.push(ev);
+        if (/no conversation found/i.test(ev.message)) sessionMissing = true;
+        continue;
+      }
+      yield* held.splice(0);
+      yield ev;
+    }
+    if (!sessionMissing || this.saidAnything) {
+      yield* held;
+      return;
+    }
+    this.sessionId = undefined;
+    yield { type: "error", message: "Couldn't resume Claude's earlier session.", hint: "Continuing with a recap of this chat." };
+    yield* this.attempt(text.startsWith("/") ? text : `${summary}\n\n${text}`);
+  }
+
+  /** Called when Claude uses a tool: from then on a retry could repeat an edit. */
+  noteToolUse(): void {
+    this.saidAnything = true;
+  }
+
+  private async *attempt(text: string): AsyncIterable<AdapterEvent> {
+    this.saidAnything = false;
     const abort = new AbortController();
     this.abort = abort;
     const map = createSdkMapper();
@@ -103,6 +154,7 @@ export class ClaudeCodeAdapter implements Adapter {
         if (abort.signal.aborted) return;
         if (typeof msg?.session_id === "string") this.sessionId = msg.session_id;
         const ev = map(msg);
+        if (ev?.type === "text_delta") this.saidAnything = true;
         if (ev) yield ev;
       }
     } catch (e) {
