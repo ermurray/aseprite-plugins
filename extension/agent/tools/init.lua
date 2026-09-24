@@ -6,6 +6,7 @@ local layers = require("agent.tools.layers")
 local frames = require("agent.tools.frames")
 local annotate = require("agent.tools.annotate")
 local transform = require("agent.tools.transform")
+local analyze = require("agent.tools.analyze")
 
 registry.register{
   get_sprite_info = inspect.get_sprite_info,
@@ -21,6 +22,8 @@ registry.register{
   frame_ops = frames.frame_ops,
   annotate = annotate.annotate,
   transform = transform.transform,
+  analyze_colors = analyze.analyze_colors,
+  list_open_sprites = analyze.list_open_sprites,
 }
 
 return registry
