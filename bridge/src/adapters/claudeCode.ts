@@ -59,6 +59,8 @@ export class ClaudeCodeAdapter implements Adapter {
   readonly name = "claude-code";
   private sessionId?: string;
   private abort?: AbortController;
+  private resuming: boolean;
+  private saidAnything = false;
 
   constructor(
     private ctx: AdapterContext,
@@ -66,6 +68,7 @@ export class ClaudeCodeAdapter implements Adapter {
   ) {
     const s = ctx.resume?.sessionId;
     if (typeof s === "string") this.sessionId = s;
+    this.resuming = this.sessionId !== undefined;
   }
 
   private mcpServer() {
@@ -80,6 +83,30 @@ export class ClaudeCodeAdapter implements Adapter {
   }
 
   async *send(text: string): AsyncIterable<AdapterEvent> {
+    // A saved session can vanish (Claude Code cleans old ones up). If resuming fails before
+    // anything was said, start a fresh session seeded with a recap of the saved chat.
+    const summary = this.resuming ? this.ctx.resumeSummary : undefined;
+    this.resuming = false;
+    if (summary === undefined) {
+      yield* this.attempt(text);
+      return;
+    }
+    let failed = false;
+    for await (const ev of this.attempt(text)) {
+      if (!failed && ev.type === "error" && !this.saidAnything) {
+        failed = true;
+        break;
+      }
+      yield ev;
+    }
+    if (!failed) return;
+    this.sessionId = undefined;
+    yield { type: "error", message: "Couldn't resume Claude's earlier session.", hint: "Continuing with a recap of this chat." };
+    yield* this.attempt(`${summary}\n\n${text}`);
+  }
+
+  private async *attempt(text: string): AsyncIterable<AdapterEvent> {
+    this.saidAnything = false;
     const abort = new AbortController();
     this.abort = abort;
     const map = createSdkMapper();
@@ -103,6 +130,7 @@ export class ClaudeCodeAdapter implements Adapter {
         if (abort.signal.aborted) return;
         if (typeof msg?.session_id === "string") this.sessionId = msg.session_id;
         const ev = map(msg);
+        if (ev?.type === "text_delta") this.saidAnything = true;
         if (ev) yield ev;
       }
     } catch (e) {

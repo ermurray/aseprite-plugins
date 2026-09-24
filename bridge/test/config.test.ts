@@ -2,7 +2,7 @@ import { mkdtemp, readFile, stat, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { agentHome, removeBridgeInfo, snapshotDirFor, writeBridgeInfo } from "../src/config.js";
+import { agentHome, chatsDirFor, removeBridgeInfo, snapshotDirFor, writeBridgeInfo } from "../src/config.js";
 
 describe("config", () => {
   it("honours ASEPRITE_AGENT_HOME", () => {
@@ -20,7 +20,8 @@ describe("config", () => {
     await expect(access(p)).rejects.toThrow();
   });
 
-  it("puts snapshots under home/tmp", () => {
+  it("puts snapshots under home/tmp and chats under home/chats", () => {
     expect(snapshotDirFor("/h")).toBe("/h/tmp");
+    expect(chatsDirFor("/h")).toBe("/h/chats");
   });
 });

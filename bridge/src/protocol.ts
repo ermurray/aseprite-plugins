@@ -1,8 +1,14 @@
 import { z } from "zod";
+import type { HistoryItem } from "./conversations.js";
 
 export const PROTOCOL_VERSION = 1;
 
-const Hello = z.object({ type: z.literal("hello"), token: z.string(), extensionVersion: z.string() });
+const Hello = z.object({
+  type: z.literal("hello"),
+  token: z.string(),
+  extensionVersion: z.string(),
+  conversationId: z.string().optional(),
+});
 const UserMessage = z.object({ type: z.literal("user_message"), text: z.string().min(1) });
 const Cancel = z.object({ type: z.literal("cancel") });
 const NewChat = z.object({ type: z.literal("new_chat") });
@@ -22,7 +28,8 @@ export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage
 export type ExtensionMessage = z.infer<typeof ExtensionMessage>;
 
 export type BridgeMessage =
-  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string }
+  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string; conversationId: string; history: HistoryItem[] }
+  | { type: "conversation"; conversationId: string; history: HistoryItem[] }
   | { type: "text_delta"; text: string }
   | { type: "tool_activity"; summary: string }
   | { type: "tool_call"; callId: string; name: string; args: Record<string, unknown> }

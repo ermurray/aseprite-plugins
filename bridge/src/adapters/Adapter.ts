@@ -16,6 +16,8 @@ export interface AdapterContext {
   tools: ToolHost;
   systemPrompt: string;
   resume?: ResumeState;
+  /** Plain-text recap of the saved chat, for adapters that must start fresh when resume fails. */
+  resumeSummary?: string;
 }
 
 export type AdapterFactory = (ctx: AdapterContext) => Adapter;

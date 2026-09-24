@@ -130,6 +130,29 @@ describe("ClaudeCodeAdapter", () => {
   });
 });
 
+describe("resume fallback", () => {
+  it("starts a fresh session seeded with the summary when the old session is gone", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        if (params.options.resume) throw new Error("No conversation found with session ID: gone");
+        yield { ...delta("hi again"), session_id: "fresh" };
+      })();
+    }) as any;
+    const a = new ClaudeCodeAdapter(
+      { tools: noTools, systemPrompt: "SP", resume: { sessionId: "gone" }, resumeSummary: "SUMMARY" },
+      { snapshotDir: "/s", queryFn: q },
+    );
+    const evs = await collect(a.send("next"));
+    expect(evs[0]).toMatchObject({ type: "error", message: "Couldn't resume Claude's earlier session." });
+    expect(evs[1]).toEqual({ type: "text_delta", text: "hi again" });
+    expect(calls[1].options.resume).toBeUndefined();
+    expect(calls[1].prompt).toBe("SUMMARY\n\nnext");
+    expect(a.resumeState()).toEqual({ sessionId: "fresh" });
+  });
+});
+
 describe("makeToolHandler", () => {
   it("forwards to the tool host and converts the result", async () => {
     const seen: unknown[] = [];

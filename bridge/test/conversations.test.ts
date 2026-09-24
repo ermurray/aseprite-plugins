@@ -1,0 +1,75 @@
+import { mkdtemp, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { ConversationStore, HistoryRecorder, summarize } from "../src/conversations.js";
+
+describe("ConversationStore", () => {
+  it("creates, saves and loads conversations", async () => {
+    const dir = join(await mkdtemp(join(tmpdir(), "chats-")), "chats");
+    const store = new ConversationStore(dir);
+    const c = store.create();
+    expect(c.id).toMatch(/^[\w-]+$/);
+    c.items.push({ kind: "user", text: "hi" });
+    c.resume = { sessionId: "s1" };
+    await store.save(c);
+    const back = await store.load(c.id);
+    expect(back?.items).toEqual([{ kind: "user", text: "hi" }]);
+    expect(back?.resume).toEqual({ sessionId: "s1" });
+    expect(await readdir(dir)).toEqual([`${c.id}.json`]);
+  });
+
+  it("returns undefined for unknown or unsafe ids", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    expect(await store.load("nope")).toBeUndefined();
+    expect(await store.load("../../etc/passwd")).toBeUndefined();
+  });
+});
+
+describe("HistoryRecorder", () => {
+  it("records what the chat window shows", () => {
+    const items: any[] = [];
+    const r = new HistoryRecorder(items);
+    r.user("fix it");
+    r.agentDelta("Let me ");
+    r.agentDelta("look.");
+    r.activity("Looked at a");
+    r.agentDelta("\n\n");
+    r.agentDelta("Done.");
+    r.approval("a1", "Add layer");
+    r.approval("a2", "Rename");
+    r.resolveApproval("a1", true);
+    r.error("Oops", "try again");
+    r.endTurn();
+    expect(items).toEqual([
+      { kind: "user", text: "fix it" },
+      { kind: "agent", text: "Let me look." },
+      { kind: "activity", text: "Looked at a" },
+      { kind: "agent", text: "Done." },
+      { kind: "approval", id: "a1", text: "Add layer", state: "applied" },
+      { kind: "approval", id: "a2", text: "Rename", state: "cancelled" },
+      { kind: "error", text: "Oops\ntry again" },
+    ]);
+  });
+
+  it("titles a conversation after its first message", () => {
+    const items: any[] = [];
+    const r = new HistoryRecorder(items);
+    expect(r.title()).toBe("New chat");
+    r.user("x".repeat(100));
+    expect(r.title()).toHaveLength(60);
+  });
+});
+
+describe("summarize", () => {
+  it("renders recent user and agent lines for a fresh session", () => {
+    const s = summarize([
+      { kind: "user", text: "make the sky warmer" },
+      { kind: "activity", text: "Looked at a" },
+      { kind: "agent", text: "Try #f0a060." },
+    ]);
+    expect(s).toContain("Artist: make the sky warmer");
+    expect(s).toContain("You: Try #f0a060.");
+    expect(s).not.toContain("Looked at a");
+  });
+});

@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Adapter, AdapterFactory } from "./adapters/Adapter.js";
+import { ConversationStore, HistoryRecorder, summarize, type Conversation } from "./conversations.js";
 import { PROTOCOL_VERSION, parseExtensionMessage, type BridgeMessage } from "./protocol.js";
 import { ToolBroker } from "./toolBroker.js";
 import { isDraftLayer } from "./tools/constants.js";
@@ -14,6 +15,8 @@ export interface SessionDeps {
   systemPrompt: string;
   snapshotDir: string;
   toolTimeoutMs?: number;
+  /** Where conversations are saved; without one they live only as long as the connection. */
+  store?: ConversationStore;
 }
 
 function tokensMatch(a: string, b: string): boolean {
@@ -30,6 +33,8 @@ export class Session {
   private autoApprove = false;
   private draftMode = false;
   private approvals = new Map<string, (approved: boolean) => void>();
+  private conv: Conversation = new ConversationStore("").create();
+  private history = new HistoryRecorder(this.conv.items);
 
   constructor(private deps: SessionDeps) {
     this.broker = new ToolBroker(deps.send, { timeoutMs: deps.toolTimeoutMs ?? 30_000 });
@@ -52,7 +57,7 @@ export class Session {
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
           }
         }
-        this.deps.send({ type: "tool_activity", summary: def.activity(args) });
+        this.emit({ type: "tool_activity", summary: def.activity(args) });
         const fwd = def.forward ? def.forward(args) : { name, args };
         return this.broker.call(fwd.name, fwd.args);
       },
@@ -70,7 +75,7 @@ export class Session {
     const approvalId = randomUUID();
     return new Promise((resolve) => {
       this.approvals.set(approvalId, resolve);
-      this.deps.send({ type: "approval_request", approvalId, summary, ...(typeof sprite === "string" ? { sprite } : {}) });
+      this.emit({ type: "approval_request", approvalId, summary, ...(typeof sprite === "string" ? { sprite } : {}) });
     });
   }
 
@@ -82,8 +87,17 @@ export class Session {
         return;
       }
       this.authed = true;
-      this.adapter = this.newAdapter();
-      this.deps.send({ type: "ready", adapter: this.adapter.name, protocolVersion: PROTOCOL_VERSION, snapshotDir: this.deps.snapshotDir });
+      const id = parsed.message.conversationId;
+      const saved = id ? await this.deps.store?.load(id) : undefined;
+      this.useConversation(saved ?? this.newConversation());
+      this.deps.send({
+        type: "ready",
+        adapter: this.adapter!.name,
+        protocolVersion: PROTOCOL_VERSION,
+        snapshotDir: this.deps.snapshotDir,
+        conversationId: this.conv.id,
+        history: this.conv.items,
+      });
       return;
     }
     if (!parsed.ok) {
@@ -101,12 +115,14 @@ export class Session {
         return;
       case "new_chat":
         this.cancel("Chat reset");
-        this.adapter = this.newAdapter();
+        this.useConversation(this.newConversation());
         this.busy = false;
+        this.deps.send({ type: "conversation", conversationId: this.conv.id, history: this.conv.items });
         return;
       case "approval": {
         const resolve = this.approvals.get(msg.approvalId);
         this.approvals.delete(msg.approvalId);
+        this.history.resolveApproval(msg.approvalId, msg.approved);
         resolve?.(msg.approved);
         return;
       }
@@ -134,10 +150,43 @@ export class Session {
   }
 
 
-  private newAdapter(): Adapter {
+  private newConversation(): Conversation {
+    return (this.deps.store ?? new ConversationStore("")).create();
+  }
+
+  /** Switches to a conversation and starts an adapter that resumes its agent session, if any. */
+  private useConversation(conv: Conversation): void {
+    this.conv = conv;
+    this.history = new HistoryRecorder(conv.items);
+    this.history.endTurn(); // cards left pending by a previous run can no longer be answered
     let adapter: Adapter | undefined;
-    adapter = this.deps.adapterFactory({ tools: this.toolsFor(() => adapter), systemPrompt: this.deps.systemPrompt });
-    return adapter;
+    adapter = this.deps.adapterFactory({
+      tools: this.toolsFor(() => adapter),
+      systemPrompt: this.deps.systemPrompt,
+      resume: conv.resume,
+      resumeSummary: conv.resume && conv.items.length ? summarize(conv.items) : undefined,
+    });
+    this.adapter = adapter;
+  }
+
+  /** Sends a message to the extension and records it in the conversation history. */
+  private emit(m: BridgeMessage): void {
+    if (m.type === "text_delta") this.history.agentDelta(m.text);
+    else if (m.type === "tool_activity") this.history.activity(m.summary);
+    else if (m.type === "approval_request") this.history.approval(m.approvalId, m.summary);
+    else if (m.type === "error") this.history.error(m.message, m.hint);
+    this.deps.send(m);
+  }
+
+  private async persist(conv: Conversation, adapter: Adapter): Promise<void> {
+    if (!this.deps.store) return;
+    conv.title = new HistoryRecorder(conv.items).title();
+    conv.resume = adapter.resumeState() ?? conv.resume;
+    try {
+      await this.deps.store.save(conv);
+    } catch (e) {
+      console.error(`Could not save conversation ${conv.id}: ${(e as Error).message}`);
+    }
   }
 
   private async runTurn(text: string): Promise<void> {
@@ -147,13 +196,18 @@ export class Session {
     }
     this.busy = true;
     const adapter = this.adapter!;
+    const conv = this.conv;
     const current = () => this.adapter === adapter;
+    this.history.user(text);
+    await this.persist(conv, adapter);
     try {
       const note = `[AI drafts: ${this.draftMode ? "on" : "off"}]`;
-      for await (const ev of adapter.send(`${note}\n${text}`)) if (current()) this.deps.send(ev);
+      for await (const ev of adapter.send(`${note}\n${text}`)) if (current()) this.emit(ev);
     } catch (e) {
-      if (current()) this.deps.send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      if (current()) this.emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {
+      if (current()) this.history.endTurn();
+      await this.persist(conv, adapter);
       // A turn orphaned by New chat ends silently; the new chat is already idle.
       if (current()) {
         this.busy = false;

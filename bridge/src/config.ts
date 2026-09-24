@@ -18,6 +18,10 @@ export function snapshotDirFor(home: string): string {
   return join(home, "tmp");
 }
 
+export function chatsDirFor(home: string): string {
+  return join(home, "chats");
+}
+
 export async function writeBridgeInfo(home: string, info: BridgeInfo): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const p = join(home, "bridge.json");
