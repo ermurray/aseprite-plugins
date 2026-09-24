@@ -131,4 +131,36 @@ describe("conversation persistence", () => {
     const saved = await store.load(ready.conversationId);
     expect(saved?.items).toContainEqual({ kind: "notice", text: "Context 12% used" });
   });
+
+  it("Stop during the first save cancels the turn before Claude is called", async () => {
+    class SlowStore extends ConversationStore {
+      async save(c: any) {
+        await new Promise((r) => setTimeout(r, 100));
+        return super.save(c);
+      }
+    }
+    const store = new SlowStore(await mkdtemp(join(tmpdir(), "chats-")));
+    let called = 0;
+    server = await startServer({
+      port: 0,
+      token: "t",
+      systemPrompt: "",
+      snapshotDir: "/s",
+      store,
+      adapterFactory: () => ({
+        name: "fake",
+        async *send(): AsyncIterable<AdapterEvent> {
+          called++;
+          yield { type: "text_delta", text: "should not run" };
+        },
+        cancel() {},
+        resumeState: () => undefined,
+      }),
+    });
+    const { c } = await hello(server.port);
+    c.send({ type: "user_message", text: "go" });
+    c.send({ type: "cancel" });
+    await c.waitFor((m) => m.type === "turn_done", 3000);
+    expect(called).toBe(0);
+  });
 });

@@ -22,6 +22,9 @@ export interface Conversation {
 const SAFE_ID = /^[\w-]{1,64}$/;
 
 export class ConversationStore {
+  /** Saves in flight per conversation; saves run one at a time and loads wait for them. */
+  private pending = new Map<string, Promise<void>>();
+
   constructor(private dir: string) {}
 
   create(): Conversation {
@@ -31,19 +34,35 @@ export class ConversationStore {
 
   async load(id: string): Promise<Conversation | undefined> {
     if (!SAFE_ID.test(id)) return undefined;
+    await this.pending.get(id)?.catch(() => {});
     try {
-      return JSON.parse(await readFile(join(this.dir, `${id}.json`), "utf8")) as Conversation;
+      const c = JSON.parse(await readFile(join(this.dir, `${id}.json`), "utf8")) as Conversation;
+      return c && typeof c.id === "string" && Array.isArray(c.items) ? c : undefined;
     } catch {
       return undefined;
     }
   }
 
-  async save(c: Conversation): Promise<void> {
-    await mkdir(this.dir, { recursive: true, mode: 0o700 });
+  /** Snapshots `c` now and writes it after any earlier save of the same conversation. */
+  save(c: Conversation): Promise<void> {
     c.updatedAt = new Date().toISOString();
-    const path = join(this.dir, `${c.id}.json`);
-    await writeFile(`${path}.tmp`, JSON.stringify(c), { mode: 0o600 });
-    await rename(`${path}.tmp`, path);
+    const json = JSON.stringify(c);
+    const prev = this.pending.get(c.id) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => this.write(c.id, json));
+    this.pending.set(c.id, next);
+    const clear = () => {
+      if (this.pending.get(c.id) === next) this.pending.delete(c.id);
+    };
+    next.then(clear, clear);
+    return next;
+  }
+
+  private async write(id: string, json: string): Promise<void> {
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    const path = join(this.dir, `${id}.json`);
+    const tmp = `${path}.${randomUUID()}.tmp`;
+    await writeFile(tmp, json, { mode: 0o600 });
+    await rename(tmp, path);
   }
 }
 

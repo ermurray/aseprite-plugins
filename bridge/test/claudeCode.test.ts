@@ -169,6 +169,68 @@ describe("resume fallback", () => {
   });
 });
 
+describe("resume fallback only for a missing session", () => {
+  const resumed = (q: any, extra: object = {}) =>
+    new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP", resume: { sessionId: "old" }, resumeSummary: "SUMMARY", ...extra }, { snapshotDir: "/s", queryFn: q });
+
+  it("keeps the session and reports the error when the failure is transient", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        throw new Error("API Error: 529 overloaded");
+      })();
+    }) as any;
+    const a = resumed(q);
+    const evs = await collect(a.send("next"));
+    expect(calls).toHaveLength(1);
+    expect(evs).toEqual([{ type: "error", message: "API Error: 529 overloaded" }]);
+    expect(a.resumeState()).toEqual({ sessionId: "old" });
+  });
+
+  it("does not retry once a tool has been called (edits must not run twice)", async () => {
+    const calls: any[] = [];
+    let adapter: ClaudeCodeAdapter;
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        (adapter as any).noteToolUse();
+        throw new Error("No conversation found with session ID: old");
+      })();
+    }) as any;
+    adapter = resumed(q);
+    await collect(adapter.send("next"));
+    expect(calls).toHaveLength(1);
+  });
+
+  it("retries a slash command without the recap", async () => {
+    const calls: any[] = [];
+    const q = ((params: any) => {
+      calls.push(params);
+      return (async function* () {
+        if (params.options.resume) throw new Error("No conversation found with session ID: old");
+        yield delta("ok");
+      })();
+    }) as any;
+    await collect(resumed(q).send("/context"));
+    expect(calls[1].prompt).toBe("/context");
+  });
+
+  it("hides the SDK's intermediate error when it does fall back", async () => {
+    const q = ((params: any) =>
+      (async function* () {
+        if (params.options.resume) {
+          yield { type: "result", subtype: "error_during_execution", session_id: "old" };
+          throw new Error("Claude Code returned an error result: No conversation found with session ID: old");
+        }
+        yield delta("hi");
+      })()) as any;
+    const evs = await collect(resumed(q).send("next"));
+    expect(evs.map((e) => e.type)).toEqual(["error", "text_delta"]);
+    expect(evs[0]).toMatchObject({ message: "Couldn't resume Claude's earlier session." });
+  });
+});
+
 describe("makeToolHandler", () => {
   it("forwards to the tool host and converts the result", async () => {
     const seen: unknown[] = [];

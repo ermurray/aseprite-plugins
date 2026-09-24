@@ -78,6 +78,19 @@ end
 
 local LABELS = { user = "You" }
 local PREFIX = { activity = "- ", error = "! " }
+
+-- Normalized text per item, recomputed only when the item's text changes: layout runs on
+-- every paint (8x a second while Claude works) and saved chats can be long.
+local displayCache = setmetatable({}, { __mode = "k" })
+
+local function displayFor(item)
+  local raw = (PREFIX[item.kind] or "") .. item.text
+  local hit = displayCache[item]
+  if hit and hit.raw == raw then return hit.text end
+  local text = R.displayText(raw)
+  displayCache[item] = { raw = raw, text = text }
+  return text
+end
 local APPROVAL_STATE = {
   pending = "Apply or Deny below",
   applied = "Approved",
@@ -95,7 +108,7 @@ function R.layout(items, opts)
       lines[#lines + 1] = { text = label, kind = item.kind .. "_label", y = y }
       y = y + opts.lineHeight
     end
-    for _, l in ipairs(R.wrap(R.displayText((PREFIX[item.kind] or "") .. item.text), opts.width, opts.measure)) do
+    for _, l in ipairs(R.wrap(displayFor(item), opts.width, opts.measure)) do
       lines[#lines + 1] = { text = l, kind = item.kind, y = y }
       y = y + opts.lineHeight
     end

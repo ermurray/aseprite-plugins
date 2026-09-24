@@ -26,6 +26,30 @@ describe("ConversationStore", () => {
   });
 });
 
+describe("ConversationStore under concurrency", () => {
+  it("serialises saves of the same conversation and loads wait for them", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    const c = store.create();
+    const saves = [];
+    for (let n = 0; n < 20; n++) {
+      c.items = Array.from({ length: n % 2 ? 1 : 50 }, (_, k) => ({ kind: "user" as const, text: `m${n}-${k}` }));
+      saves.push(store.save({ ...c, items: [...c.items] }));
+    }
+    const loaded = store.load(c.id);
+    await Promise.all(saves);
+    const back = await loaded;
+    expect(back?.items).toHaveLength(1);
+    expect(back?.items[0].text).toBe("m19-0");
+  });
+
+  it("treats a file with the wrong shape as missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chats-"));
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(dir, "bad.json"), JSON.stringify({ id: "bad" }));
+    expect(await new ConversationStore(dir).load("bad")).toBeUndefined();
+  });
+});
+
 describe("HistoryRecorder", () => {
   it("records what the chat window shows", () => {
     const items: any[] = [];

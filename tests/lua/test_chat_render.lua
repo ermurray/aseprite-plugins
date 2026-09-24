@@ -109,3 +109,18 @@ end)
 T.test("displayText drops other control characters", function()
   T.eq(R.displayText("a\27[1mb\0c\127d"), "a[1mbcd")
 end)
+
+T.test("layout normalizes each item's text once, and again only when it changes", function()
+  local real, calls = R.displayText, 0
+  R.displayText = function(s) calls = calls + 1; return real(s) end
+  local item = { kind = "agent", text = "hello" }
+  local opts = { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" }
+  R.layout({ item }, opts)
+  R.layout({ item }, opts)
+  T.eq(calls, 1, "cached between paints")
+  item.text = "hello world"
+  local lay = R.layout({ item }, opts)
+  T.eq(calls, 2, "recomputed after streaming appends")
+  T.eq(lay.lines[2].text, "hello world")
+  R.displayText = real
+end)

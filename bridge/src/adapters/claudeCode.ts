@@ -87,32 +87,46 @@ export class ClaudeCodeAdapter implements Adapter {
       version: "0.1.0",
       tools: TOOL_DEFS.map((def) => {
         const handler = makeToolHandler(def, this.ctx.tools, this.opts.snapshotDir);
-        return tool(def.name, def.description, def.shape, async (args) => (await handler(args as Record<string, unknown>)) as any);
+        return tool(def.name, def.description, def.shape, async (args) => {
+          this.noteToolUse();
+          return (await handler(args as Record<string, unknown>)) as any;
+        });
       }),
     });
   }
 
   async *send(text: string): AsyncIterable<AdapterEvent> {
-    // A saved session can vanish (Claude Code cleans old ones up). If resuming fails before
-    // anything was said, start a fresh session seeded with a recap of the saved chat.
+    // A saved session can vanish (Claude Code cleans old ones up). Only when the SDK says so,
+    // and before Claude said or did anything, start a fresh session seeded with a recap.
     const summary = this.resuming ? this.ctx.resumeSummary : undefined;
     this.resuming = false;
     if (summary === undefined) {
       yield* this.attempt(text);
       return;
     }
-    let failed = false;
+    const held: AdapterEvent[] = [];
+    let sessionMissing = false;
     for await (const ev of this.attempt(text)) {
-      if (!failed && ev.type === "error" && !this.saidAnything) {
-        failed = true;
-        break;
+      if (ev.type === "error" && !this.saidAnything) {
+        held.push(ev);
+        if (/no conversation found/i.test(ev.message)) sessionMissing = true;
+        continue;
       }
+      yield* held.splice(0);
       yield ev;
     }
-    if (!failed) return;
+    if (!sessionMissing || this.saidAnything) {
+      yield* held;
+      return;
+    }
     this.sessionId = undefined;
     yield { type: "error", message: "Couldn't resume Claude's earlier session.", hint: "Continuing with a recap of this chat." };
-    yield* this.attempt(`${summary}\n\n${text}`);
+    yield* this.attempt(text.startsWith("/") ? text : `${summary}\n\n${text}`);
+  }
+
+  /** Called when Claude uses a tool: from then on a retry could repeat an edit. */
+  noteToolUse(): void {
+    this.saidAnything = true;
   }
 
   private async *attempt(text: string): AsyncIterable<AdapterEvent> {

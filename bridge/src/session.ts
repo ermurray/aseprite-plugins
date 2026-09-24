@@ -34,6 +34,7 @@ export class Session {
   private autoApprove = false;
   private draftMode = false;
   private approvals = new Map<string, (approved: boolean) => void>();
+  private turnCancelled = false;
   private conv: Conversation = new ConversationStore("").create();
   private history = new HistoryRecorder(this.conv.items);
 
@@ -141,6 +142,7 @@ export class Session {
   }
 
   private cancel(reason: string): void {
+    this.turnCancelled = true;
     this.adapter?.cancel();
     for (const resolve of this.approvals.values()) resolve(false);
     this.approvals.clear();
@@ -210,9 +212,12 @@ export class Session {
     const adapter = this.adapter!;
     const conv = this.conv;
     const current = () => this.adapter === adapter;
+    this.turnCancelled = false;
     this.history.user(text);
     await this.persist(conv, adapter);
     try {
+      // Stop, New chat or a disconnect during that save: don't start Claude at all.
+      if (!current() || this.turnCancelled) return;
       if (cmd && !ALLOWED_COMMANDS.has(cmd.name)) {
         this.emit({ type: "error", message: `/${cmd.name} isn't available in Aseprite.`, hint: "Try /compact, /context, /usage, /model, /effort, /recap or /clear." });
         return;
