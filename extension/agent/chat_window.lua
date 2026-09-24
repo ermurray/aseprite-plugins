@@ -43,6 +43,14 @@ function ChatWindow.new(opts)
     autoApprove = false,
     tick = 0,
   }, ChatWindow)
+  self.unlockTimer = Timer{
+    interval = 0.4,
+    ontick = function()
+      self.unlockTimer:stop()
+      self.model:unlockApply()
+      self:syncButtons()
+    end,
+  }
   self.timer = Timer{
     interval = 0.12,
     ontick = function()
@@ -115,6 +123,7 @@ end
 -- Full shutdown (extension unload).
 function ChatWindow:close()
   self.timer:stop()
+  self.unlockTimer:stop()
   self.conn:close()
   if self.open then self.dlg:close() end
 end
@@ -148,14 +157,15 @@ end
 function ChatWindow:syncButtons()
   if not self.open then return end
   self.dlg:modify{ id = "send", text = self:mainButtonText() }
-  self.dlg:modify{ id = "apply", visible = self.model:pendingApproval() ~= nil }
+  self.dlg:modify{ id = "apply", visible = self.model:applyAvailable() }
 end
 
 function ChatWindow:answerApproval(approved)
-  local item = self.model:pendingApproval()
+  if approved and not self.model:applyAvailable() then return end
+  local item = self.model:answerPending(approved)
   if not item then return end
   self.conn:send{ type = "approval", approvalId = item.id, approved = approved }
-  self.model:resolveApproval(item.id, approved)
+  if self.model.applyLocked then self.unlockTimer:start() end
   self:syncButtons()
   self:repaint()
 end

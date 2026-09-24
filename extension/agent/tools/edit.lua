@@ -60,30 +60,45 @@ function M.pixelValue(sprite, hex)
   end
   local pal = sprite.palettes[1]
   for i = 0, #pal - 1 do
-    local c = pal:getColor(i)
-    if c.red == r and c.green == g and c.blue == b and c.alpha == a then return i end
+    local c = i ~= sprite.transparentColor and pal:getColor(i)
+    if c and c.red == r and c.green == g and c.blue == b and c.alpha == a then return i end
   end
   error(hex .. " is not in the palette of " .. sprites.name(sprite) .. " (indexed mode). Add it with add_palette_colors first.", 0)
 end
 
--- A full-canvas copy of the layer's image in `frame` (transparent where there is no cel).
+-- A copy of the layer's image in `frame` covering the canvas plus any part of the cel that
+-- hangs off it (Aseprite keeps off-canvas pixels). Returns the image and its origin in
+-- sprite coordinates: sprite (x, y) is image (x - origin.x, y - origin.y).
 function M.canvasImage(sprite, layer, frame)
-  local img = Image(sprite.spec)
-  img:clear(M.transparentValue(sprite))
+  local x1, y1, x2, y2 = 0, 0, sprite.width, sprite.height
   local cel = layer:cel(frame)
-  if cel then img:drawImage(cel.image, cel.position, 255, BlendMode.SRC) end
-  return img
+  if cel then
+    local b = cel.bounds
+    x1, y1 = math.min(x1, b.x), math.min(y1, b.y)
+    x2, y2 = math.max(x2, b.x + b.width), math.max(y2, b.y + b.height)
+  end
+  local spec = sprite.spec
+  spec.width, spec.height = x2 - x1, y2 - y1
+  local img = Image(spec)
+  img:clear(M.transparentValue(sprite))
+  if cel then img:drawImage(cel.image, Point(cel.position.x - x1, cel.position.y - y1), 255, BlendMode.SRC) end
+  return img, Point(x1, y1)
 end
 
--- Writes a full-canvas image back as the layer's cel in `frame`. Call inside M.transaction.
-function M.commit(sprite, layer, frame, img)
+-- Writes an image from canvasImage back as the layer's cel. Call inside M.transaction.
+function M.commit(sprite, layer, frame, img, origin)
+  origin = origin or Point(0, 0)
   local cel = layer:cel(frame)
   if cel then
     cel.image = img
-    cel.position = Point(0, 0)
+    cel.position = origin
   else
-    sprite:newCel(layer, frame, img, Point(0, 0))
+    sprite:newCel(layer, frame, img, origin)
   end
+end
+
+function M.isDraftName(name)
+  return type(name) == "string" and name:match("^%s*(.-)%s*$"):lower() == M.DRAFT_LAYER:lower()
 end
 
 return M

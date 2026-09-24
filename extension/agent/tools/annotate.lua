@@ -39,12 +39,17 @@ function M.annotate(args)
       layer = s:newLayer()
       layer.name = edit.NOTES_LAYER
     end
-    local img = args.clear and Image(s.spec) or edit.canvasImage(s, layer, frame)
-    if args.clear then img:clear(edit.transparentValue(s)) end
-    for _, p in ipairs(all) do
-      if p.x >= 0 and p.y >= 0 and p.x < s.width and p.y < s.height then img:drawPixel(p.x, p.y, value) end
+    local img, o
+    if args.clear then
+      img, o = Image(s.spec), Point(0, 0)
+      img:clear(edit.transparentValue(s))
+    else
+      img, o = edit.canvasImage(s, layer, frame)
     end
-    edit.commit(s, layer, frame, img)
+    for _, p in ipairs(all) do
+      if p.x >= 0 and p.y >= 0 and p.x < s.width and p.y < s.height then img:drawPixel(p.x - o.x, p.y - o.y, value) end
+    end
+    edit.commit(s, layer, frame, img, o)
   end)
   return { sprite = sprites.name(s), layer = edit.NOTES_LAYER, frame = frame.frameNumber, marks = #args.shapes }
 end

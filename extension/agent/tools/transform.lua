@@ -56,16 +56,16 @@ function M.transform(args)
   end
   local changed = 0
   edit.transaction(s, action .. " " .. layer.name, function()
-    local img = edit.canvasImage(s, layer, frame)
+    local img, o = edit.canvasImage(s, layer, frame)
     local out
     if action == "outline" then
       out, changed = outline(img, s, value, args.place or "outside")
     elseif action == "flip_horizontal" or action == "flip_vertical" then
-      out, changed = flip(img, action == "flip_horizontal", rx, ry, rw, rh)
+      out, changed = flip(img, action == "flip_horizontal", rx - o.x, ry - o.y, rw, rh)
     else
       error("Unknown transform '" .. tostring(action) .. "'.", 0)
     end
-    edit.commit(s, layer, frame, out)
+    edit.commit(s, layer, frame, out, o)
   end)
   return { sprite = sprites.name(s), layer = layer.name, frame = frame.frameNumber, changed = changed }
 end

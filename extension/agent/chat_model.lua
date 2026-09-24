@@ -54,6 +54,24 @@ function ChatModel:resolveApproval(id, approved)
   end
 end
 
+-- Answers the first pending card. If another card is queued behind it, Apply stays locked
+-- until unlockApply(), so a double-click can't approve a card the artist hasn't read.
+function ChatModel:answerPending(approved)
+  local item = self:pendingApproval()
+  if not item then return nil end
+  self:resolveApproval(item.id, approved)
+  self.applyLocked = self:pendingApproval() ~= nil
+  return item
+end
+
+function ChatModel:unlockApply()
+  self.applyLocked = false
+end
+
+function ChatModel:applyAvailable()
+  return self:pendingApproval() ~= nil and not self.applyLocked
+end
+
 function ChatModel:pendingApproval()
   for _, item in ipairs(self.items) do
     if item.kind == "approval" and item.state == "pending" then return item end

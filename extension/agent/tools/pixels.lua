@@ -21,8 +21,12 @@ M.ensureDraftLayer = ensureDraftLayer
 function M.set_pixels(args)
   local s = edit.editableSprite(args.sprite)
   local layerName = tostring(args.layer)
-  if layerName:lower() == edit.DRAFT_LAYER:lower() then
-    ensureDraftLayer(s)
+  if edit.isDraftName(layerName) then
+    -- Only ensure_draft_layer (after the artist approves draft mode) creates this layer, so
+    -- draft painting is limited to sprites where draft mode was approved.
+    if not pcall(sprites.layer, s, edit.DRAFT_LAYER) then
+      error("This sprite has no AI Draft layer. Draft mode must be approved for it first (request_draft_mode).", 0)
+    end
     layerName = edit.DRAFT_LAYER
   end
   local layer = edit.drawableLayer(s, layerName)
@@ -37,9 +41,9 @@ function M.set_pixels(args)
     pts[#pts + 1] = { x = x, y = y, v = edit.pixelValue(s, p.color) }
   end
   edit.transaction(s, ("set %d pixels"):format(#pts), function()
-    local img = edit.canvasImage(s, layer, frame)
-    for _, p in ipairs(pts) do img:drawPixel(p.x, p.y, p.v) end
-    edit.commit(s, layer, frame, img)
+    local img, o = edit.canvasImage(s, layer, frame)
+    for _, p in ipairs(pts) do img:drawPixel(p.x - o.x, p.y - o.y, p.v) end
+    edit.commit(s, layer, frame, img, o)
   end)
   return { sprite = sprites.name(s), layer = layer.name, frame = frame.frameNumber, changed = #pts }
 end
@@ -70,7 +74,9 @@ function M.replace_color(args)
     rx, ry, rw, rh = edit.int(args.region.x), edit.int(args.region.y), edit.int(args.region.w), edit.int(args.region.h)
   end
   local pal = s.palettes[1]
+  local skip = s.colorMode == ColorMode.INDEXED and s.transparentColor or nil
   local function matches(v)
+    if v == skip then return false end
     local r, g, b, a = color.rgbaOf(v, s.colorMode, pal)
     return math.abs(r - fr) <= tol and math.abs(g - fg) <= tol and math.abs(b - fb) <= tol and math.abs(a - fa) <= tol
   end
