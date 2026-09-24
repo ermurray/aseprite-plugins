@@ -17,6 +17,7 @@ local COLORS = {
   user_label = Color{ r = 110, g = 160, b = 255 },
   agent_label = Color{ r = 120, g = 200, b = 140 },
   activity = Color{ r = 140, g = 140, b = 140 },
+  thinking = Color{ r = 140, g = 140, b = 140 },
   error = Color{ r = 230, g = 90, b = 80 },
 }
 
@@ -36,12 +37,20 @@ function ChatWindow.new(opts)
     viewH = 0,
     contentH = 0,
     lineH = 14,
+    open = false,
+    tick = 0,
   }, ChatWindow)
+  self.timer = Timer{
+    interval = 0.12,
+    ontick = function()
+      self.tick = self.tick + 1
+      self:repaint()
+    end,
+  }
   self.conn = Connection.new{
     onMessage = function(m) self:onMessage(m) end,
     onStatus = function(s, d) self:onStatus(s, d) end,
   }
-  self:build()
   return self
 end
 
@@ -71,34 +80,50 @@ function ChatWindow:build()
   self.dlg = dlg
 end
 
+-- Closing the window only hides it: the chat and the bridge connection live on
+-- until New chat or Aseprite quits, so reopening brings the conversation back.
 function ChatWindow:show()
-  local b = self.opts.prefs.bounds
-  if b then
-    self.dlg:show{ wait = false, bounds = Rectangle(b.x, b.y, b.w, b.h) }
-  else
-    self.dlg:show{ wait = false }
+  if not self.open then
+    self:build()
+    self.open = true
+    local b = self.opts.prefs.bounds
+    if b then
+      self.dlg:show{ wait = false, bounds = Rectangle(b.x, b.y, b.w, b.h) }
+    else
+      self.dlg:show{ wait = false }
+    end
+    self.dlg:modify{ id = "status", text = STATUS_TEXT[self.conn.status] or self.conn.status }
+    self.dlg:modify{ id = "send", text = self.busy and "Stop" or "Send" }
   end
   if self.conn.status == "disconnected" then self.conn:connect() end
 end
 
+-- Full shutdown (extension unload).
 function ChatWindow:close()
-  self.dlg:close()
+  self.timer:stop()
+  self.conn:close()
+  if self.open then self.dlg:close() end
 end
 
 function ChatWindow:onClosed()
   local b = self.dlg.bounds
   self.opts.prefs.bounds = { x = b.x, y = b.y, w = b.width, h = b.height }
-  self.conn:close()
-  if self.opts.onclose then self.opts.onclose() end
+  self.open = false
 end
 
 function ChatWindow:repaint()
-  self.dlg:repaint()
+  if self.open then self.dlg:repaint() end
 end
 
 function ChatWindow:setBusy(busy)
   self.busy = busy
-  self.dlg:modify{ id = "send", text = busy and "Stop" or "Send" }
+  if busy then
+    self.tick = 0
+    self.timer:start()
+  else
+    self.timer:stop()
+  end
+  if self.open then self.dlg:modify{ id = "send", text = busy and "Stop" or "Send" } end
 end
 
 function ChatWindow:onSendOrStop()
@@ -138,8 +163,7 @@ function ChatWindow:newChat()
 end
 
 function ChatWindow:onStatus(status, detail)
-  local text = STATUS_TEXT[status] or status
-  self.dlg:modify{ id = "status", text = text }
+  if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT[status] or status } end
   if status == "disconnected" and self.busy then
     self.model:addError("Lost connection to the bridge.", detail)
     self.model:endTurn()
@@ -182,6 +206,7 @@ function ChatWindow:paint(gc)
     lineHeight = self.lineH,
     gap = GAP,
     agentLabel = self.agentLabel,
+    thinking = self.busy and (self.tick // 3) or nil,
   })
   self.viewH = gc.height
   self.contentH = lay.height + 2 * PAD
@@ -197,6 +222,9 @@ function ChatWindow:paint(gc)
     if y > -self.lineH and y < gc.height then
       gc.color = COLORS[line.kind] or textColor
       gc:fillText(line.text, PAD, y)
+      if line.kind == "thinking" then
+        self:paintSpinner(gc, PAD + gc:measureText(render.thinkingText(self.agentLabel, 3)).width + 8, y + self.lineH // 2 - 2)
+      end
     end
   end
 
@@ -205,6 +233,18 @@ function ChatWindow:paint(gc)
     local barY = (self.viewH - barH) * self.scroll / (self.contentH - self.viewH)
     gc.color = Color{ r = 128, g = 128, b = 128, a = 140 }
     gc:fillRect(Rectangle(gc.width - 5, barY, 4, barH))
+  end
+end
+
+-- Eight pixel dots in a ring; the bright one walks around with the timer tick.
+local RING = { { 0, -4 }, { 3, -3 }, { 4, 0 }, { 3, 3 }, { 0, 4 }, { -3, 3 }, { -4, 0 }, { -3, -3 } }
+
+function ChatWindow:paintSpinner(gc, cx, cy)
+  local head = self.tick % #RING
+  for i, p in ipairs(RING) do
+    local age = (head - (i - 1)) % #RING
+    gc.color = Color{ r = 120, g = 200, b = 140, a = math.max(40, 255 - age * 40) }
+    gc:fillRect(Rectangle(cx + p[1], cy + p[2], 2, 2))
   end
 end
 

@@ -61,7 +61,17 @@ function R.layout(items, opts)
       y = y + opts.lineHeight
     end
   end
+  -- opts.thinking is the animation tick while a turn is running, nil when idle.
+  if opts.thinking then
+    if #items > 0 then y = y + opts.gap end
+    lines[#lines + 1] = { text = R.thinkingText(opts.agentLabel or "Agent", opts.thinking), kind = "thinking", y = y }
+    y = y + opts.lineHeight
+  end
   return { lines = lines, height = y }
+end
+
+function R.thinkingText(label, tick)
+  return label .. " is thinking" .. string.rep(".", tick % 4)
 end
 
 function R.clampScroll(scroll, contentHeight, viewHeight)

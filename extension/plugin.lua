@@ -10,9 +10,7 @@ function init(plugin)
     title = "Agent Chat",
     group = "edit_insert",
     onclick = function()
-      if not window then
-        window = ChatWindow.new{ prefs = plugin.preferences, onclose = function() window = nil end }
-      end
+      if not window then window = ChatWindow.new{ prefs = plugin.preferences } end
       window:show()
     end,
   }
