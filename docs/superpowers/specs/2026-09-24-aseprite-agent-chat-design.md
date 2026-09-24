@@ -396,3 +396,13 @@ interface; approval, budgets, persistence, and tools are shared.
   and any Aseprite script-security prompts.
 - Current Claude Agent SDK API for custom tools, disabling built-ins, streaming,
   and resume.
+
+### Verified 2026-09-24 (Aseprite 1.3.18, apiVersion 41; Agent SDK 0.3.281)
+
+- `json`, `WebSocket`, `app.params`, `os.execute`/`io.popen` are available; `Sprite{fromFile=}` opens/closes cleanly in batch mode (UI tab behaviour still to confirm in Plan 3).
+- **Undo:** mutating `cel.image` in place is neither undoable nor rolled back on error. Clone → modify → assign (`cel.image = copy`) inside `app.transaction` is one undo step and rolls back when the function errors. All edit tools must use this pattern.
+- Extensions don't load in batch mode, so Lua tests require modules directly; UI is verified manually.
+- Agent SDK: `tools: []` disables built-ins, `settingSources: []` skips user/project settings, `resume`, `includePartialMessages`, `abortController`, `createSdkMcpServer` + `tool()` (zod v4).
+- **Adapter interface delta (supersedes §10 sketch):** adapters receive a `ToolHost` and call tools directly (matching SDK in-process MCP handlers) instead of yielding `tool_call` events. The approval gate wraps the `ToolHost`, so all adapters still inherit it.
+- Snapshots are written to a bridge-owned dir (`~/.aseprite-agent/tmp`, announced in `ready`); the bridge only reads/deletes `aseagent-*.png` files directly inside it.
+- The Aseprite UI font can't render emoji: buttons are text-labelled (e.g. "Attach", "Clip") rather than 📎/📌.
