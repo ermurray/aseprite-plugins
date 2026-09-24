@@ -1,0 +1,53 @@
+local M = {}
+
+function M.name(sprite)
+  return app.fs.fileName(sprite.filename)
+end
+
+function M.openList()
+  local names = {}
+  for _, s in ipairs(app.sprites) do names[#names + 1] = M.name(s) end
+  return #names > 0 and table.concat(names, ", ") or "(none)"
+end
+
+function M.resolve(ref)
+  if ref == nil or ref == "" then
+    local s = app.sprite
+    if not s then error("No sprite is open in Aseprite.", 0) end
+    return s
+  end
+  for _, s in ipairs(app.sprites) do
+    if s.filename == ref or M.name(s) == ref then return s end
+  end
+  error("Sprite '" .. ref .. "' is not open. Open sprites: " .. M.openList(), 0)
+end
+
+function M.frame(sprite, n)
+  n = n and (math.tointeger(n) or n)
+  if n == nil then
+    if app.sprite == sprite and app.frame then return app.frame end
+    return sprite.frames[1]
+  end
+  local ok, f = pcall(function() return sprite.frames[n] end)
+  if not ok or not f then
+    error(("Frame %d does not exist (sprite has %d frames)."):format(n, #sprite.frames), 0)
+  end
+  return f
+end
+
+function M.layer(sprite, name)
+  local function find(layers)
+    for _, l in ipairs(layers) do
+      if l.name == name then return l end
+      if l.isGroup then
+        local hit = find(l.layers)
+        if hit then return hit end
+      end
+    end
+  end
+  local l = find(sprite.layers)
+  if not l then error("Layer '" .. name .. "' not found.", 0) end
+  return l
+end
+
+return M
