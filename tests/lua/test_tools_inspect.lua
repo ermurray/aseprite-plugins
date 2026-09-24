@@ -179,3 +179,16 @@ T.test("unknown tools and internal errors are reported, not thrown", function()
 end)
 
 closeAll()
+
+T.test("dispatch works with args decoded by Aseprite's json (userdata, floats)", function()
+  closeAll()
+  rgbSprite("decoded.aseprite")
+  local msg = json.decode('{"args":{"sprite":"decoded.aseprite","frame":1,"layer":"Body","region":{"x":0,"y":0,"w":2,"h":1}}}')
+  local r = call("get_pixels", msg.args)
+  T.eq(r.ok, true, r.error)
+  T.deepEq(r.data.rows, { "#ff0000 #00ff00" })
+  local bad = call("get_sprite_info", json.decode('{"sprite":"nope.aseprite"}'))
+  T.eq(bad.error:find("Sprite 'nope.aseprite' is not open", 1, true) ~= nil, true, bad.error)
+end)
+
+closeAll()
