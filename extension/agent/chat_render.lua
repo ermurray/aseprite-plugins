@@ -57,8 +57,9 @@ local PUNCT = {
   [0x00A0] = " ", [0x2009] = " ", [0x200A] = " ", [0x202F] = " ", [0x200B] = "",
 }
 
-function R.displayText(s)
-  s = s:gsub("%*%*", ""):gsub("[\t\r\f\v]", " "):gsub("[%z\1-\8\14-\31\127]", "")
+function R.displayText(s, keepMarkdown)
+  if not keepMarkdown then s = s:gsub("%*%*", "") end
+  s = s:gsub("[\t\r\f\v]", " "):gsub("[%z\1-\8\14-\31\127]", "")
   local ok, out = pcall(function()
     local parts = {}
     for _, code in utf8.codes(s) do
@@ -87,7 +88,7 @@ local function displayFor(item)
   local raw = (PREFIX[item.kind] or "") .. item.text
   local hit = displayCache[item]
   if hit and hit.raw == raw then return hit.text end
-  local text = R.displayText(raw)
+  local text = R.displayText(raw, item.kind == "user") -- the artist's own text is shown as typed
   displayCache[item] = { raw = raw, text = text }
   return text
 end

@@ -33,10 +33,26 @@ function ChatModel:addNotice(text)
 end
 
 -- Status-bar hint for bridge events that happen while the chat window is hidden.
-function ChatModel.hiddenTip(messageType, agentLabel)
+function ChatModel.hiddenTip(messageType, agentLabel, replied)
   if messageType == "approval_request" then return agentLabel .. " is waiting for your approval - open Agent Chat" end
-  if messageType == "turn_done" then return agentLabel .. " replied - open Agent Chat to read it" end
+  if messageType == "turn_done" and replied then return agentLabel .. " replied - open Agent Chat to read it" end
   return nil
+end
+
+-- True when the latest turn ended with Claude's text (not an error, not nothing).
+function ChatModel:lastTurnReplied()
+  for i = #self.items, 1, -1 do
+    local kind = self.items[i].kind
+    if kind == "agent" then return true end
+    if kind == "error" or kind == "user" then return false end
+  end
+  return false
+end
+
+-- An error that exists only in this window (not known to the bridge), e.g. "Lost connection".
+function ChatModel:addLocalError(message, hint)
+  self:addError(message, hint)
+  self.items[#self.items].localOnly = true
 end
 
 function ChatModel:addError(message, hint)
@@ -102,7 +118,15 @@ end
 
 -- Replaces the chat with saved history from the bridge (json userdata or tables).
 -- Cards that were still pending can no longer be answered, so they show as cancelled.
-function ChatModel:loadHistory(items)
+function ChatModel:loadHistory(items, opts)
+  -- Window-only lines at the end (e.g. "Lost connection") survive a reload of the same chat.
+  local keep = {}
+  if not (opts and opts.dropLocal) then
+    for i = #self.items, 1, -1 do
+      if not self.items[i].localOnly then break end
+      table.insert(keep, 1, self.items[i])
+    end
+  end
   self.items = {}
   self.streaming = false
   self.applyLocked = false
@@ -115,6 +139,7 @@ function ChatModel:loadHistory(items)
     end
     self.items[#self.items + 1] = item
   end
+  for _, item in ipairs(keep) do self.items[#self.items + 1] = item end
 end
 
 function ChatModel:clear()

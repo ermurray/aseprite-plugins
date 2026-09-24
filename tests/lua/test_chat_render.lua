@@ -124,3 +124,10 @@ T.test("layout normalizes each item's text once, and again only when it changes"
   T.eq(lay.lines[2].text, "hello world")
   R.displayText = real
 end)
+
+T.test("markdown ** is only removed from Claude's text, not from what the artist typed", function()
+  local opts = { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" }
+  local lay = R.layout({ { kind = "user", text = "is 2**3 right?" }, { kind = "agent", text = "**Yes**, 8." } }, opts)
+  T.eq(lay.lines[2].text, "is 2**3 right?")
+  T.eq(lay.lines[4].text, "Yes, 8.")
+end)

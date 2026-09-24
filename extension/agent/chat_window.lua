@@ -29,6 +29,11 @@ local function themeColor(name, fallback)
   return (ok and c) or fallback
 end
 
+-- Status-bar message (replaceable in tests; Aseprite's app table can't be patched).
+function ChatWindow.showTip(text)
+  pcall(app.tip, text, 8)
+end
+
 function ChatWindow.new(opts)
   local self = setmetatable({
     opts = opts,
@@ -198,21 +203,23 @@ function ChatWindow:onSendOrStop()
     self:answerApproval(false)
     return
   elseif action == "stop" then
+    self.cancelRequested = true
     self.conn:send{ type = "cancel" }
     return
   elseif action == "reject_busy" then
-    self.model:addError("Still working on the previous message.", "Wait for it to finish, or clear the box and press Stop.")
+    self.model:addLocalError("Still working on the previous message.", "Wait for it to finish, or clear the box and press Stop.")
     self:repaint()
     return
   elseif action == "ignore" then
     return
   end
   if self.conn.status ~= "connected" then
-    self.model:addError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
+    self.model:addLocalError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
     self:repaint()
     return
   end
   self.model:addUser(text)
+  self.cancelRequested = false
   self.followTail = true
   self.dlg:modify{ id = "input", text = "" }
   self.conn:send{ type = "user_message", text = text }
@@ -223,6 +230,9 @@ end
 function ChatWindow:newChat()
   if self.busy then self.conn:send{ type = "cancel" } end
   self.conn:send{ type = "new_chat" }
+  -- Forget the old conversation locally too: if this New chat never reached the bridge
+  -- (disconnected), reconnecting must not bring the old chat back.
+  self.opts.prefs.conversationId = nil
   self.model:clear()
   self:syncButtons()
   self.scroll = 0
@@ -234,7 +244,7 @@ end
 function ChatWindow:onStatus(status, detail)
   if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT[status] or status } end
   if status == "disconnected" and self.busy then
-    self.model:addError("Lost connection to the bridge.", detail)
+    self.model:addLocalError("Lost connection to the bridge.", detail)
     self.model:endTurn()
     self:setBusy(false)
     self:repaint()
@@ -243,13 +253,14 @@ end
 
 function ChatWindow:onMessage(m)
   if not self.open then
-    local tip = ChatModel.hiddenTip(m.type, self.agentLabel)
-    if tip then pcall(app.tip, tip, 8) end
+    local replied = m.type == "turn_done" and not self.cancelRequested and self.model:lastTurnReplied()
+    local tip = ChatModel.hiddenTip(m.type, self.agentLabel, replied)
+    if tip then ChatWindow.showTip(tip) end
   end
   if m.type == "ready" or m.type == "conversation" then
     -- The bridge's saved conversation is the source of truth after (re)connecting or New chat.
     self.opts.prefs.conversationId = m.conversationId
-    if m.history then self.model:loadHistory(m.history) end
+    if m.history then self.model:loadHistory(m.history, { dropLocal = m.type == "conversation" }) end
     self.followTail = true
     self:syncButtons()
   end
