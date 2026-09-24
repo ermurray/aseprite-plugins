@@ -46,18 +46,29 @@ end
 
 local LABELS = { user = "You" }
 local PREFIX = { activity = "- ", error = "! " }
+local APPROVAL_STATE = {
+  pending = "Apply or Deny below",
+  applied = "Approved",
+  denied = "Denied",
+  cancelled = "Cancelled",
+}
 
 function R.layout(items, opts)
   local lines, y = {}, 0
   for i, item in ipairs(items) do
     if i > 1 then y = y + opts.gap end
     local label = LABELS[item.kind] or (item.kind == "agent" and (opts.agentLabel or "Agent")) or nil
+    if item.kind == "approval" then label = (opts.agentLabel or "Agent") .. " wants to:" end
     if label then
       lines[#lines + 1] = { text = label, kind = item.kind .. "_label", y = y }
       y = y + opts.lineHeight
     end
     for _, l in ipairs(R.wrap((PREFIX[item.kind] or "") .. item.text, opts.width, opts.measure)) do
       lines[#lines + 1] = { text = l, kind = item.kind, y = y }
+      y = y + opts.lineHeight
+    end
+    if item.kind == "approval" then
+      lines[#lines + 1] = { text = APPROVAL_STATE[item.state] or item.state, kind = "approval_state", y = y }
       y = y + opts.lineHeight
     end
   end

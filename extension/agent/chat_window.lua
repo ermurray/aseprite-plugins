@@ -18,6 +18,8 @@ local COLORS = {
   agent_label = Color{ r = 120, g = 200, b = 140 },
   activity = Color{ r = 140, g = 140, b = 140 },
   thinking = Color{ r = 140, g = 140, b = 140 },
+  approval_label = Color{ r = 240, g = 180, b = 80 },
+  approval_state = Color{ r = 140, g = 140, b = 140 },
   error = Color{ r = 230, g = 90, b = 80 },
 }
 
@@ -38,6 +40,7 @@ function ChatWindow.new(opts)
     contentH = 0,
     lineH = 14,
     open = false,
+    autoApprove = false,
     tick = 0,
   }, ChatWindow)
   self.timer = Timer{
@@ -75,6 +78,17 @@ function ChatWindow:build()
     onwheel = function(ev) self:scrollBy(ev.deltaY * 3 * self.lineH) end,
   }
   dlg:newrow()
+  dlg:button{ id = "apply", text = "Apply", visible = false, onclick = function() self:answerApproval(true) end }
+  dlg:check{
+    id = "autoapprove",
+    text = "Auto-approve edits",
+    selected = self.autoApprove,
+    onclick = function()
+      self.autoApprove = self.dlg.data.autoapprove
+      self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
+    end,
+  }
+  dlg:newrow()
   dlg:entry{ id = "input", hexpand = true }
   dlg:button{ id = "send", text = "Send", focus = true, onclick = function() self:onSendOrStop() end }
   self.dlg = dlg
@@ -93,7 +107,7 @@ function ChatWindow:show()
       self.dlg:show{ wait = false }
     end
     self.dlg:modify{ id = "status", text = STATUS_TEXT[self.conn.status] or self.conn.status }
-    self.dlg:modify{ id = "send", text = self.busy and "Stop" or "Send" }
+    self:syncButtons()
   end
   if self.conn.status == "disconnected" then self.conn:connect() end
 end
@@ -123,13 +137,36 @@ function ChatWindow:setBusy(busy)
   else
     self.timer:stop()
   end
-  if self.open then self.dlg:modify{ id = "send", text = busy and "Stop" or "Send" } end
+  self:syncButtons()
+end
+
+function ChatWindow:mainButtonText()
+  if self.model:pendingApproval() then return "Deny" end
+  return self.busy and "Stop" or "Send"
+end
+
+function ChatWindow:syncButtons()
+  if not self.open then return end
+  self.dlg:modify{ id = "send", text = self:mainButtonText() }
+  self.dlg:modify{ id = "apply", visible = self.model:pendingApproval() ~= nil }
+end
+
+function ChatWindow:answerApproval(approved)
+  local item = self.model:pendingApproval()
+  if not item then return end
+  self.conn:send{ type = "approval", approvalId = item.id, approved = approved }
+  self.model:resolveApproval(item.id, approved)
+  self:syncButtons()
+  self:repaint()
 end
 
 function ChatWindow:onSendOrStop()
   local text = (self.dlg.data.input or ""):match("^%s*(.-)%s*$")
-  local action = ChatModel.sendAction(self.busy, text)
-  if action == "stop" then
+  local action = ChatModel.sendAction(self.busy, text, self.model:pendingApproval() ~= nil)
+  if action == "deny" then
+    self:answerApproval(false)
+    return
+  elseif action == "stop" then
     self.conn:send{ type = "cancel" }
     return
   elseif action == "reject_busy" then
@@ -156,6 +193,7 @@ function ChatWindow:newChat()
   if self.busy then self.conn:send{ type = "cancel" } end
   self.conn:send{ type = "new_chat" }
   self.model:clear()
+  self:syncButtons()
   self.scroll = 0
   self.followTail = true
   self:setBusy(false)
@@ -176,6 +214,10 @@ function ChatWindow:onMessage(m)
   if m.type == "ready" then
     inspect.snapshotDir = m.snapshotDir
     self.agentLabel = (m.adapter == "claude-code") and "Claude" or tostring(m.adapter)
+    self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
+  elseif m.type == "approval_request" then
+    self.model:addApproval(m.approvalId, m.summary)
+    self:syncButtons()
   elseif m.type == "text_delta" then
     self.model:appendAgent(m.text)
   elseif m.type == "tool_activity" then
@@ -183,9 +225,11 @@ function ChatWindow:onMessage(m)
   elseif m.type == "tool_call" then
     local res = tools.dispatch(m.name, m.args)
     self.conn:send{ type = "tool_result", callId = m.callId, ok = res.ok, data = res.data, error = res.error }
+    if res.ok then app.refresh() end
   elseif m.type == "turn_done" then
     self.model:endTurn()
     self:setBusy(false)
+    self:syncButtons()
   elseif m.type == "error" then
     self.model:addError(m.message, m.hint)
   end
@@ -206,7 +250,7 @@ function ChatWindow:paint(gc)
     lineHeight = self.lineH,
     gap = GAP,
     agentLabel = self.agentLabel,
-    thinking = self.busy and (self.tick // 3) or nil,
+    thinking = (self.busy and not self.model:pendingApproval()) and (self.tick // 3) or nil,
   })
   self.viewH = gc.height
   self.contentH = lay.height + 2 * PAD

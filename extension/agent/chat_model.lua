@@ -36,12 +36,36 @@ end
 
 function ChatModel:endTurn()
   self.streaming = false
+  for _, item in ipairs(self.items) do
+    if item.kind == "approval" and item.state == "pending" then item.state = "cancelled" end
+  end
 end
 
--- What the Send/Stop button should do. A typed follow-up while busy is rejected
--- rather than silently cancelling the answer in progress.
-function ChatModel.sendAction(busy, text)
+function ChatModel:addApproval(id, summary)
+  self.items[#self.items + 1] = { kind = "approval", id = id, text = summary, state = "pending" }
+  self.streaming = false
+end
+
+function ChatModel:resolveApproval(id, approved)
+  for _, item in ipairs(self.items) do
+    if item.kind == "approval" and item.id == id and item.state == "pending" then
+      item.state = approved and "applied" or "denied"
+    end
+  end
+end
+
+function ChatModel:pendingApproval()
+  for _, item in ipairs(self.items) do
+    if item.kind == "approval" and item.state == "pending" then return item end
+  end
+  return nil
+end
+
+-- What the Send/Stop/Deny button (and Enter) should do. A typed follow-up while busy is
+-- rejected rather than silently cancelling; with an approval pending, Enter denies it.
+function ChatModel.sendAction(busy, text, approvalPending)
   local empty = (text or ""):match("^%s*$") ~= nil
+  if approvalPending then return empty and "deny" or "reject_busy" end
   if busy then return empty and "stop" or "reject_busy" end
   return empty and "ignore" or "send"
 end

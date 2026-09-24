@@ -72,3 +72,15 @@ T.test("an empty history while thinking shows only the thinking line", function(
   local lay = R.layout({}, { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude", thinking = 2 })
   T.deepEq(lay.lines, { { text = "Claude is thinking..", kind = "thinking", y = 0 } })
 end)
+
+T.test("approval cards show a label, the summary and the state", function()
+  local items = { { kind = "approval", id = "a1", text = "Set 2 pixels on hero", state = "pending" } }
+  local lay = R.layout(items, { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" })
+  T.deepEq(lay.lines, {
+    { text = "Claude wants to:", kind = "approval_label", y = 0 },
+    { text = "Set 2 pixels on hero", kind = "approval", y = 10 },
+    { text = "Apply or Deny below", kind = "approval_state", y = 20 },
+  })
+  items[1].state = "denied"
+  T.eq(R.layout(items, { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" }).lines[3].text, "Denied")
+end)
