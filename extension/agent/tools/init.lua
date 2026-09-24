@@ -4,6 +4,8 @@ local pixels = require("agent.tools.pixels")
 local palette = require("agent.tools.palette")
 local layers = require("agent.tools.layers")
 local frames = require("agent.tools.frames")
+local annotate = require("agent.tools.annotate")
+local transform = require("agent.tools.transform")
 
 registry.register{
   get_sprite_info = inspect.get_sprite_info,
@@ -17,6 +19,8 @@ registry.register{
   layer_ops = layers.layer_ops,
   ensure_draft_layer = layers.ensure_draft_layer,
   frame_ops = frames.frame_ops,
+  annotate = annotate.annotate,
+  transform = transform.transform,
 }
 
 return registry
