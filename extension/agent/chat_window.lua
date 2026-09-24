@@ -102,12 +102,18 @@ function ChatWindow:setBusy(busy)
 end
 
 function ChatWindow:onSendOrStop()
-  if self.busy then
+  local text = (self.dlg.data.input or ""):match("^%s*(.-)%s*$")
+  local action = ChatModel.sendAction(self.busy, text)
+  if action == "stop" then
     self.conn:send{ type = "cancel" }
     return
+  elseif action == "reject_busy" then
+    self.model:addError("Still working on the previous message.", "Wait for it to finish, or clear the box and press Stop.")
+    self:repaint()
+    return
+  elseif action == "ignore" then
+    return
   end
-  local text = (self.dlg.data.input or ""):match("^%s*(.-)%s*$")
-  if text == "" then return end
   if self.conn.status ~= "connected" then
     self.model:addError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
     self:repaint()

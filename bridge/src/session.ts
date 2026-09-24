@@ -26,12 +26,16 @@ export class Session {
   private busy = false;
   private adapter?: Adapter;
   private broker: ToolBroker;
-  private tools: ToolHost;
 
   constructor(private deps: SessionDeps) {
     this.broker = new ToolBroker(deps.send, { timeoutMs: deps.toolTimeoutMs ?? 30_000 });
-    this.tools = {
+  }
+
+  /** Tools for one adapter. Once that adapter is replaced (New chat), its late calls fail silently. */
+  private toolsFor(owner: () => Adapter | undefined): ToolHost {
+    return {
       call: (name, args) => {
+        if (this.adapter !== owner()) return Promise.resolve({ ok: false, error: "Chat reset" });
         const def = toolDef(name);
         this.deps.send({ type: "tool_activity", summary: def ? def.activity(args) : `Used ${name}` });
         return this.broker.call(name, args);
@@ -67,6 +71,7 @@ export class Session {
       case "new_chat":
         this.cancel("Chat reset");
         this.adapter = this.newAdapter();
+        this.busy = false;
         return;
       case "tool_result":
         this.broker.resolve(msg.callId, msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error ?? "Unknown tool error" });
@@ -84,7 +89,9 @@ export class Session {
   }
 
   private newAdapter(): Adapter {
-    return this.deps.adapterFactory({ tools: this.tools, systemPrompt: this.deps.systemPrompt });
+    let adapter: Adapter | undefined;
+    adapter = this.deps.adapterFactory({ tools: this.toolsFor(() => adapter), systemPrompt: this.deps.systemPrompt });
+    return adapter;
   }
 
   private async runTurn(text: string): Promise<void> {
@@ -93,13 +100,18 @@ export class Session {
       return;
     }
     this.busy = true;
+    const adapter = this.adapter!;
+    const current = () => this.adapter === adapter;
     try {
-      for await (const ev of this.adapter!.send(text)) this.deps.send(ev);
+      for await (const ev of adapter.send(text)) if (current()) this.deps.send(ev);
     } catch (e) {
-      this.deps.send({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      if (current()) this.deps.send({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {
-      this.busy = false;
-      this.deps.send({ type: "turn_done" });
+      // A turn orphaned by New chat ends silently; the new chat is already idle.
+      if (current()) {
+        this.busy = false;
+        this.deps.send({ type: "turn_done" });
+      }
     }
   }
 }

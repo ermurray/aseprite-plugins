@@ -15,6 +15,8 @@ function ChatModel:appendAgent(delta)
   if self.streaming and last and last.kind == "agent" then
     last.text = last.text .. delta
   else
+    delta = delta:gsub("^%s+", "")
+    if delta == "" then return end
     self.items[#self.items + 1] = { kind = "agent", text = delta }
     self.streaming = true
   end
@@ -34,6 +36,14 @@ end
 
 function ChatModel:endTurn()
   self.streaming = false
+end
+
+-- What the Send/Stop button should do. A typed follow-up while busy is rejected
+-- rather than silently cancelling the answer in progress.
+function ChatModel.sendAction(busy, text)
+  local empty = (text or ""):match("^%s*$") ~= nil
+  if busy then return empty and "stop" or "reject_busy" end
+  return empty and "ignore" or "send"
 end
 
 function ChatModel:clear()

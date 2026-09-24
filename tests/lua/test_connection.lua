@@ -22,3 +22,17 @@ T.test("decodeMessage accepts object messages and rejects others", function()
   T.eq(Connection.decodeMessage('"just a string"'), nil)
   T.eq(Connection.decodeMessage("{bad"), nil)
 end)
+
+T.test("events from a replaced socket are ignored", function()
+  local statuses = {}
+  local c = Connection.new{ onMessage = function() end, onStatus = function(s) statuses[#statuses + 1] = s end }
+  local old, new = {}, {}
+  local oldHandler = c:handlerFor(old)
+  c.ws = new
+  c.status = "connected"
+  oldHandler(WebSocketMessageType.CLOSE, "", "closed")
+  T.eq(c.status, "connected")
+  T.eq(#statuses, 0)
+  c:handlerFor(new)(WebSocketMessageType.CLOSE, "", "closed")
+  T.eq(c.status, "disconnected")
+end)

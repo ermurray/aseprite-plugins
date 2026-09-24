@@ -129,3 +129,31 @@ describe("bridge server", () => {
     expect(c.received.find((m) => m.type === "error")).toMatchObject({ message: "kaboom" });
   });
 });
+
+describe("new chat during a running turn", () => {
+  it("drops the old turn's output and accepts the next message immediately", async () => {
+    let first = true;
+    const s = await start(async function* (ctx, text) {
+      if (first) {
+        first = false;
+        await ctx.tools.call("get_sprite_info", {});
+        await ctx.tools.call("get_palette", {});
+        yield { type: "text_delta", text: "stale" };
+        return;
+      }
+      yield { type: "text_delta", text: `fresh:${text}` };
+    });
+    const c = await authed(s.port);
+    c.send({ type: "user_message", text: "one" });
+    await c.waitFor((m) => m.type === "tool_call");
+    const before = c.received.length;
+    c.send({ type: "cancel" });
+    c.send({ type: "new_chat" });
+    c.send({ type: "user_message", text: "two" });
+    await c.waitFor((m) => m.type === "text_delta" && m.text === "fresh:two");
+    await c.waitFor((m) => m.type === "turn_done");
+    await new Promise((r) => setTimeout(r, 50));
+    const after = c.received.slice(before);
+    expect(after).toEqual([{ type: "text_delta", text: "fresh:two" }, { type: "turn_done" }]);
+  });
+});

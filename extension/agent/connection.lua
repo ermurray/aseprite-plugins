@@ -51,15 +51,25 @@ function Connection:connect()
   end
   self.token = info.token
   self:setStatus("connecting")
-  self.ws = WebSocket{
+  local ws
+  ws = WebSocket{
     url = "ws://127.0.0.1:" .. math.tointeger(info.port),
     deflate = false,
     minreconnectwait = 1,
     maxreconnectwait = 10,
-    onreceive = function(kind, data, err) self:onReceive(kind, data, err) end,
+    onreceive = function(kind, data, err) return self:handlerFor(ws)(kind, data, err) end,
   }
-  self.ws:connect()
+  self.ws = ws
+  ws:connect()
   return true
+end
+
+-- Events are only handled for the current socket: a replaced socket's late
+-- CLOSE must not mark the new connection as disconnected.
+function Connection:handlerFor(ws)
+  return function(kind, data, err)
+    if self.ws == ws then self:onReceive(kind, data, err) end
+  end
 end
 
 function Connection:onReceive(kind, data, err)
