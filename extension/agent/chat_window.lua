@@ -120,6 +120,16 @@ function ChatWindow:show()
   if self.conn.status == "disconnected" then self.conn:connect() end
 end
 
+-- Hotkey behaviour: hide if open, show if hidden. Hiding keeps the chat, the bridge
+-- connection and Claude's session, exactly like closing the window.
+function ChatWindow:toggle()
+  if self.open then
+    self.dlg:close()
+  else
+    self:show()
+  end
+end
+
 -- Full shutdown (extension unload).
 function ChatWindow:close()
   self.timer:stop()

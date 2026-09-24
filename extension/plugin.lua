@@ -11,7 +11,7 @@ function init(plugin)
     group = "edit_insert",
     onclick = function()
       if not window then window = ChatWindow.new{ prefs = plugin.preferences } end
-      window:show()
+      window:toggle()
     end,
   }
 end
