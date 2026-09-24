@@ -88,6 +88,23 @@ function ChatModel.sendAction(busy, text, approvalPending)
   return empty and "ignore" or "send"
 end
 
+-- Replaces the chat with saved history from the bridge (json userdata or tables).
+-- Cards that were still pending can no longer be answered, so they show as cancelled.
+function ChatModel:loadHistory(items)
+  self.items = {}
+  self.streaming = false
+  self.applyLocked = false
+  for i = 1, #items do
+    local it = items[i]
+    local item = { kind = tostring(it.kind), text = tostring(it.text) }
+    if item.kind == "approval" then
+      item.id = tostring(it.id)
+      item.state = (it.state == "pending") and "cancelled" or tostring(it.state)
+    end
+    self.items[#self.items + 1] = item
+  end
+end
+
 function ChatModel:clear()
   self.items = {}
   self.streaming = false

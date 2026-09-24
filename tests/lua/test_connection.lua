@@ -36,3 +36,13 @@ T.test("events from a replaced socket are ignored", function()
   c:handlerFor(new)(WebSocketMessageType.CLOSE, "", "closed")
   T.eq(c.status, "disconnected")
 end)
+
+T.test("hello carries the conversation to resume", function()
+  local sent = {}
+  local c = Connection.new{ onMessage = function() end, onStatus = function() end, conversationId = function() return "conv-1" end }
+  c.token = "tok"
+  c.send = function(_, msg) sent[#sent + 1] = msg end
+  c:onReceive(WebSocketMessageType.OPEN, "", nil)
+  T.eq(sent[1].type, "hello")
+  T.eq(sent[1].conversationId, "conv-1")
+end)

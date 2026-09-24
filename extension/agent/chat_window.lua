@@ -61,6 +61,7 @@ function ChatWindow.new(opts)
   self.conn = Connection.new{
     onMessage = function(m) self:onMessage(m) end,
     onStatus = function(s, d) self:onStatus(s, d) end,
+    conversationId = function() return self.opts.prefs.conversationId end,
   }
   return self
 end
@@ -240,6 +241,13 @@ function ChatWindow:onStatus(status, detail)
 end
 
 function ChatWindow:onMessage(m)
+  if m.type == "ready" or m.type == "conversation" then
+    -- The bridge's saved conversation is the source of truth after (re)connecting or New chat.
+    self.opts.prefs.conversationId = m.conversationId
+    if m.history then self.model:loadHistory(m.history) end
+    self.followTail = true
+    self:syncButtons()
+  end
   if m.type == "ready" then
     inspect.snapshotDir = m.snapshotDir
     self.agentLabel = (m.adapter == "claude-code") and "Claude" or tostring(m.adapter)

@@ -93,3 +93,20 @@ T.test("answering a card locks Apply while the next queued card appears", functi
   T.eq(m:applyAvailable(), false, "nothing pending")
   T.eq(m.items[2].state, "denied")
 end)
+
+T.test("loadHistory replaces the chat with saved items (json userdata) and cancels stale cards", function()
+  local m = ChatModel.new()
+  m:addUser("old")
+  m:loadHistory(json.decode('[{"kind":"user","text":"hello"},{"kind":"agent","text":"hi"},{"kind":"approval","id":"a1","text":"Add layer","state":"pending"},{"kind":"approval","id":"a2","text":"Rename","state":"applied"}]'))
+  T.deepEq(m.items, {
+    { kind = "user", text = "hello" },
+    { kind = "agent", text = "hi" },
+    { kind = "approval", id = "a1", text = "Add layer", state = "cancelled" },
+    { kind = "approval", id = "a2", text = "Rename", state = "applied" },
+  })
+  T.eq(m:pendingApproval(), nil)
+  m:appendAgent("new reply")
+  T.eq(#m.items, 5, "a new reply starts its own item after loading")
+  m:loadHistory(json.decode("[]"))
+  T.eq(#m.items, 0)
+end)

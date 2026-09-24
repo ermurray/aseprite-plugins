@@ -77,7 +77,8 @@ function Connection:onReceive(kind, data, err)
     -- Re-read the token on every (re)connect: a restarted bridge has a new one.
     local info = Connection.readBridgeInfo(Connection.infoPath())
     if info then self.token = info.token end
-    self:send{ type = "hello", token = self.token, extensionVersion = VERSION }
+    local conversationId = self.opts.conversationId and self.opts.conversationId() or nil
+    self:send{ type = "hello", token = self.token, extensionVersion = VERSION, conversationId = conversationId }
   elseif kind == WebSocketMessageType.TEXT then
     local msg = Connection.decodeMessage(data)
     if msg then
