@@ -16,8 +16,9 @@ const ToolResultMsg = z.object({
 
 const Approval = z.object({ type: z.literal("approval"), approvalId: z.string(), approved: z.boolean() });
 const SetAutoApprove = z.object({ type: z.literal("set_auto_approve"), enabled: z.boolean() });
+const SetDraftMode = z.object({ type: z.literal("set_draft_mode"), enabled: z.boolean() });
 
-export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove]);
+export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove, SetDraftMode]);
 export type ExtensionMessage = z.infer<typeof ExtensionMessage>;
 
 export type BridgeMessage =

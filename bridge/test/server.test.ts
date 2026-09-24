@@ -141,7 +141,7 @@ describe("new chat during a running turn", () => {
         yield { type: "text_delta", text: "stale" };
         return;
       }
-      yield { type: "text_delta", text: `fresh:${text}` };
+      yield { type: "text_delta", text: `fresh:${text.split("\n").pop()}` };
     });
     const c = await authed(s.port);
     c.send({ type: "user_message", text: "one" });

@@ -94,19 +94,15 @@ describe("approval gate", () => {
     expect(rec.results.map((r) => r.ok)).toEqual([true, false]);
   });
 
-  it("auto-approve skips cards, except for request_draft_mode", async () => {
+  it("auto-approve skips cards", async () => {
     const c = await setup(async function* (ctx) {
       await ctx.tools.call("layer_ops", { action: "add", name: "A" });
-      await ctx.tools.call("request_draft_mode", { quote: "please just block it out" });
     });
     c.send({ type: "set_auto_approve", enabled: true });
     c.send({ type: "user_message", text: "go" });
-    const req = await c.waitFor((m) => m.type === "approval_request");
-    expect(req).toMatchObject({ summary: expect.stringContaining("AI Draft") });
-    const calls = c.received.filter((m) => m.type === "tool_call");
-    expect(calls).toHaveLength(1);
-    c.send({ type: "approval", approvalId: (req as any).approvalId, approved: true });
     await c.waitFor((m) => m.type === "turn_done");
+    expect(c.received.some((m) => m.type === "approval_request")).toBe(false);
+    expect(c.received.filter((m) => m.type === "tool_call")).toHaveLength(1);
   });
 
   it("cancel resolves a pending approval as declined", async () => {
@@ -136,40 +132,58 @@ describe("draft mode", () => {
     expect(rec.results.map((r) => r.ok)).toEqual([true, true, true, true, true, true]);
   });
 
-  it("keeps the AI Draft layer locked until request_draft_mode is approved", async () => {
+  it("with AI drafts off, draft tools are refused with a pointer to the toggle and no card", async () => {
     const rec = recorder();
     const c = await setup(async function* (ctx) {
-      rec.push(await ctx.tools.call("set_pixels", px(10, "ai draft")));
-      rec.push(await ctx.tools.call("request_draft_mode", { quote: "no really, block it out for me" }));
-      rec.push(await ctx.tools.call("set_pixels", px(2000, "AI Draft")));
+      rec.push(await ctx.tools.call("create_draft_layer", {}));
+      rec.push(await ctx.tools.call("set_pixels", px(10, " ai draft ")));
     });
-    c.send({ type: "set_auto_approve", enabled: true });
     c.send({ type: "user_message", text: "draw it" });
-    await approveNext(c, true);
     await c.waitFor((m) => m.type === "turn_done");
-    expect(rec.results[0]).toMatchObject({ ok: false, error: expect.stringContaining("locked") });
-    expect(rec.results[1].ok).toBe(true);
-    expect(rec.results[2].ok).toBe(true);
+    for (const r of rec.results) expect(r).toMatchObject({ ok: false, error: expect.stringContaining("Allow AI drafts") });
+    expect(c.received.some((m) => m.type === "approval_request" || m.type === "tool_call")).toBe(false);
+  });
+
+  it("with AI drafts on, create_draft_layer and draft painting go through", async () => {
+    const rec = recorder();
+    const c = await setup(async function* (ctx) {
+      rec.push(await ctx.tools.call("create_draft_layer", { sprite: "a.aseprite" }));
+      rec.push(await ctx.tools.call("set_pixels", { sprite: "a.aseprite", ...px(2000, "AI Draft") }));
+    });
+    c.send({ type: "set_draft_mode", enabled: true });
+    c.send({ type: "set_auto_approve", enabled: true });
+    c.send({ type: "user_message", text: "block it out" });
+    await c.waitFor((m) => m.type === "turn_done");
+    expect(rec.results.map((r) => r.ok)).toEqual([true, true]);
     const calls = c.received.filter((m) => m.type === "tool_call").map((m) => (m as any).name);
     expect(calls).toEqual(["ensure_draft_layer", "set_pixels"]);
   });
 
-  it("New chat turns draft mode off again", async () => {
+  it("the drafts toggle is a window setting: New chat keeps it", async () => {
     const rec = recorder();
-    let turn = 0;
     const c = await setup(async function* (ctx) {
-      turn++;
-      if (turn === 1) rec.push(await ctx.tools.call("request_draft_mode", { quote: "block it out please" }));
-      else rec.push(await ctx.tools.call("set_pixels", px(5, "AI Draft")));
+      rec.push(await ctx.tools.call("create_draft_layer", {}));
     });
-    c.send({ type: "user_message", text: "one" });
-    await approveNext(c, true);
-    await c.waitFor((m) => m.type === "turn_done");
+    c.send({ type: "set_draft_mode", enabled: true });
+    c.send({ type: "set_auto_approve", enabled: true });
     c.send({ type: "new_chat" });
+    c.send({ type: "user_message", text: "draft" });
+    await c.waitFor((m) => m.type === "turn_done");
+    expect(rec.results[0].ok).toBe(true);
+  });
+
+  it("every message tells Claude whether AI drafts are on", async () => {
+    const seen: string[] = [];
+    const c = await setup(async function* (_ctx, text) {
+      seen.push(text);
+    });
+    c.send({ type: "user_message", text: "hello" });
+    await c.waitFor((m) => m.type === "turn_done");
+    c.send({ type: "set_draft_mode", enabled: true });
     const before = c.received.length;
-    c.send({ type: "user_message", text: "two" });
+    c.send({ type: "user_message", text: "again" });
     await c.waitFor((m) => m.type === "turn_done" && c.received.indexOf(m) >= before);
-    expect(rec.results[1]).toMatchObject({ ok: false, error: expect.stringContaining("locked") });
+    expect(seen).toEqual(["[AI drafts: off]\nhello", "[AI drafts: on]\nagain"]);
   });
 
   it("add_color_ramp is forwarded as add_palette_colors", async () => {

@@ -4,9 +4,12 @@ import { TOOL_DEFS } from "../src/tools/definitions.js";
 
 describe("system prompt", () => {
   it("mentions the rules Claude must follow for edits", () => {
-    for (const phrase of ["approval", "Apply", "AI Draft", "request_draft_mode", "reference", "annotate", "one undo"]) {
+    for (const phrase of ["approval", "Apply", "AI Draft", "create_draft_layer", "Allow AI drafts", "[AI drafts: on]", "reference", "annotate", "one undo"]) {
       expect(SYSTEM_PROMPT).toContain(phrase);
     }
+  });
+  it("does not ask the artist to insist or argue about drafts", () => {
+    expect(SYSTEM_PROMPT).not.toContain("insist");
   });
   it("no longer claims there are no editing tools", () => {
     expect(SYSTEM_PROMPT).not.toContain("no drawing or editing tools");
@@ -17,7 +20,7 @@ describe("system prompt", () => {
   it("only names tools that exist", () => {
     const names = new Set(TOOL_DEFS.map((d) => d.name));
     for (const m of SYSTEM_PROMPT.matchAll(/\b([a-z]+(?:_[a-z]+)+)\b/g)) {
-      if (["get_", "set_", "add_", "list_", "request_", "replace_", "layer_", "frame_", "analyze_"].some((p) => m[1].startsWith(p))) {
+      if (["get_", "set_", "add_", "list_", "create_", "replace_", "layer_", "frame_", "analyze_"].some((p) => m[1].startsWith(p))) {
         expect(names.has(m[1]), m[1]).toBe(true);
       }
     }

@@ -46,12 +46,11 @@ export class Session {
         if (def.kind === "edit") {
           const rejection = this.checkDraftLock(def, args);
           if (rejection) return { ok: false, error: rejection };
-          if (def.alwaysAsk || !this.autoApprove) {
+          if (!this.autoApprove) {
             const approved = await this.askApproval(def.summarize!(args), args.sprite);
             if (stale()) return { ok: false, error: "Chat reset" };
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
           }
-          if (def.name === "request_draft_mode") this.draftMode = true;
         }
         this.deps.send({ type: "tool_activity", summary: def.activity(args) });
         const fwd = def.forward ? def.forward(args) : { name, args };
@@ -60,10 +59,11 @@ export class Session {
     };
   }
 
-  /** Painting on the AI Draft layer is only allowed once the artist has approved draft mode. */
+  /** Draft tools only work while the artist has "Allow AI drafts" switched on in the window. */
   private checkDraftLock(def: ToolDef, args: Record<string, unknown>): string | undefined {
-    if (def.name !== "set_pixels" || !isDraftLayer(args.layer) || this.draftMode) return undefined;
-    return "The AI Draft layer is locked. Offer guidance first; only if the artist insists, call request_draft_mode with their words.";
+    const draftTool = def.name === "create_draft_layer" || (def.name === "set_pixels" && isDraftLayer(args.layer));
+    if (!draftTool || this.draftMode) return undefined;
+    return 'AI drafts are switched off. Tell the artist you will not draw it for them, but can block out a rough draft on a 40% "AI Draft" layer if they switch on "Allow AI drafts" in the chat window.';
   }
 
   private askApproval(summary: string, sprite: unknown): Promise<boolean> {
@@ -103,7 +103,6 @@ export class Session {
         this.cancel("Chat reset");
         this.adapter = this.newAdapter();
         this.busy = false;
-        this.draftMode = false;
         return;
       case "approval": {
         const resolve = this.approvals.get(msg.approvalId);
@@ -113,6 +112,9 @@ export class Session {
       }
       case "set_auto_approve":
         this.autoApprove = msg.enabled;
+        return;
+      case "set_draft_mode":
+        this.draftMode = msg.enabled;
         return;
       case "tool_result":
         this.broker.resolve(msg.callId, msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error ?? "Unknown tool error" });
@@ -147,7 +149,8 @@ export class Session {
     const adapter = this.adapter!;
     const current = () => this.adapter === adapter;
     try {
-      for await (const ev of adapter.send(text)) if (current()) this.deps.send(ev);
+      const note = `[AI drafts: ${this.draftMode ? "on" : "off"}]`;
+      for await (const ev of adapter.send(`${note}\n${text}`)) if (current()) this.deps.send(ev);
     } catch (e) {
       if (current()) this.deps.send({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {

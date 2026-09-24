@@ -7,9 +7,9 @@ describe("tool definitions", () => {
     const names = TOOL_DEFS.map((d) => d.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names.sort()).toEqual([
-      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "frame_ops", "get_palette",
+      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "create_draft_layer", "frame_ops", "get_palette",
       "get_pixels", "get_snapshot", "get_sprite_info", "layer_ops", "list_open_sprites", "replace_color",
-      "request_draft_mode", "set_palette", "set_pixels", "transform",
+      "set_palette", "set_pixels", "transform",
     ]);
   });
 
@@ -35,11 +35,11 @@ describe("tool definitions", () => {
     expect((fwd.args.colors as string[]).length).toBe(5);
   });
 
-  it("request_draft_mode always asks and forwards to ensure_draft_layer", () => {
-    const d = toolDef("request_draft_mode")!;
-    expect(d.alwaysAsk).toBe(true);
-    expect(d.forward!({ sprite: "a.aseprite", quote: "just draw it" })).toEqual({ name: "ensure_draft_layer", args: { sprite: "a.aseprite" } });
-    expect(d.summarize!({ quote: "just draw it" })).toContain('You said: "just draw it"');
+  it("create_draft_layer forwards to ensure_draft_layer", () => {
+    const d = toolDef("create_draft_layer")!;
+    expect(d.kind).toBe("edit");
+    expect(d.forward!({ sprite: "a.aseprite" })).toEqual({ name: "ensure_draft_layer", args: { sprite: "a.aseprite" } });
+    expect(d.summarize!({ sprite: "a.aseprite" })).toBe('Create a rough "AI Draft" layer on a.aseprite (40% opacity, for you to redraw over)');
   });
 
   it("validates colors and set_pixels shape", () => {

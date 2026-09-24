@@ -35,4 +35,7 @@ describe("parseExtensionMessage", () => {
     expect(parseExtensionMessage(JSON.stringify({ type: "set_auto_approve", enabled: false })).ok).toBe(true);
     expect(parseExtensionMessage(JSON.stringify({ type: "approval", approvalId: "a1" })).ok).toBe(false);
   });
+  it("accepts set_draft_mode", () => {
+    expect(parseExtensionMessage(JSON.stringify({ type: "set_draft_mode", enabled: true })).ok).toBe(true);
+  });
 });

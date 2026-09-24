@@ -14,8 +14,6 @@ export interface ToolDef {
   summarize?(args: Record<string, unknown>): string;
   /** The tool name and args actually sent to the extension. Defaults to this tool's own. */
   forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
-  /** Edit tools that must show an approval card even when auto-approve is on. */
-  alwaysAsk?: boolean;
 }
 
 const spriteArg = z
@@ -233,7 +231,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "set_pixels",
     kind: "edit",
-    description: `Set individual pixels on a layer for fixes (stray pixels, jaggies, anti-aliasing, a highlight). color '.' erases. It is not for painting artwork for the artist. Painting on the "${DRAFT_LAYER}" layer is only possible after request_draft_mode was approved.`,
+    description: `Set individual pixels on a layer for fixes (stray pixels, jaggies, anti-aliasing, a highlight). color '.' erases. It is not for painting artwork for the artist. Painting on the "${DRAFT_LAYER}" layer only works while the artist has "Allow AI drafts" switched on.`,
     shape: {
       sprite: spriteArg,
       layer: z.string(),
@@ -301,16 +299,15 @@ export const TOOL_DEFS: ToolDef[] = [
         : `${a.action === "flip_horizontal" ? "Flip horizontally" : "Flip vertically"}: ${target(a)}${a.region ? " (region only)" : ""}`,
   },
   {
-    name: "request_draft_mode",
+    name: "create_draft_layer",
     kind: "edit",
-    alwaysAsk: true,
-    description: `Only after the artist has insisted on you blocking something out, even after you offered to guide them: ask to unlock a rough "${DRAFT_LAYER}" layer (40% opacity) that set_pixels may paint on. quote must be the artist's own words insisting.`,
-    shape: { sprite: spriteArg, quote: z.string().min(3) },
-    activity: (a) => `Unlocked the ${DRAFT_LAYER} layer on ${spriteName(a)}`,
-    summarize: (a) =>
-      `Unlock a rough "${DRAFT_LAYER}" layer on ${spriteName(a)} (40% opacity; redraw over it, then delete it). You said: "${a.quote}"`,
+    description: `Only while the artist has "Allow AI drafts" switched on: create the rough "${DRAFT_LAYER}" layer (40% opacity) so set_pixels can block out shapes on it for the artist to redraw over. Never paint finished art.`,
+    shape: { sprite: spriteArg },
+    activity: (a) => `Created the ${DRAFT_LAYER} layer on ${spriteName(a)}`,
+    summarize: (a) => `Create a rough "${DRAFT_LAYER}" layer on ${spriteName(a)} (40% opacity, for you to redraw over)`,
     forward: (a) => ({ name: "ensure_draft_layer", args: { sprite: a.sprite } }),
   },
+
 ];
 
 export function toolDef(name: string): ToolDef | undefined {

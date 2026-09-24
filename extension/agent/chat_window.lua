@@ -96,6 +96,15 @@ function ChatWindow:build()
       self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
     end,
   }
+  dlg:check{
+    id = "allowdrafts",
+    text = "Allow AI drafts",
+    selected = self.opts.prefs.allowDrafts == true,
+    onclick = function()
+      self.opts.prefs.allowDrafts = self.dlg.data.allowdrafts
+      self.conn:send{ type = "set_draft_mode", enabled = self.opts.prefs.allowDrafts }
+    end,
+  }
   dlg:newrow()
   dlg:entry{ id = "input", hexpand = true }
   dlg:button{ id = "send", text = "Send", focus = true, onclick = function() self:onSendOrStop() end }
