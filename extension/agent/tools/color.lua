@@ -35,4 +35,26 @@ M.COLOR_MODES = {
   [ColorMode.INDEXED] = "indexed",
 }
 
+function M.parseHex(hex)
+  local s = type(hex) == "string" and hex:match("^#(%x+)$")
+  if not s or (#s ~= 6 and #s ~= 8) then
+    error("Invalid color '" .. tostring(hex) .. "'; use #rrggbb or #rrggbbaa.", 0)
+  end
+  local a = #s == 8 and tonumber(s:sub(7, 8), 16) or 255
+  return tonumber(s:sub(1, 2), 16), tonumber(s:sub(3, 4), 16), tonumber(s:sub(5, 6), 16), a
+end
+
+-- r, g, b, a of a raw pixel value in the given color mode.
+function M.rgbaOf(value, colorMode, palette)
+  if colorMode == ColorMode.RGB then
+    return pc.rgbaR(value), pc.rgbaG(value), pc.rgbaB(value), pc.rgbaA(value)
+  elseif colorMode == ColorMode.GRAYSCALE then
+    local v = pc.grayaV(value)
+    return v, v, v, pc.grayaA(value)
+  end
+  if value >= #palette then return 0, 0, 0, 0 end
+  local c = palette:getColor(value)
+  return c.red, c.green, c.blue, c.alpha
+end
+
 return M

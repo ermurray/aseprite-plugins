@@ -25,7 +25,7 @@ local function layerTree(layers)
 end
 
 -- Flattened visible image of a frame, or one layer's cel placed at its position.
-local function render(sprite, frame, layerName)
+function M.render(sprite, frame, layerName)
   local img = Image(sprite.spec)
   img:clear()
   if layerName then
@@ -88,7 +88,7 @@ local counter = 0
 function M.get_snapshot(args)
   local s = sprites.resolve(args.sprite)
   local frame = sprites.frame(s, args.frame)
-  local img = render(s, frame, args.layer)
+  local img = M.render(s, frame, args.layer)
   local region
   if args.region then
     region = clip(s, args.region)
@@ -121,7 +121,7 @@ function M.get_pixels(args)
   if r.w > 64 or r.h > 64 then error("Region is limited to 64x64 pixels; use get_snapshot for larger areas.", 0) end
   local frame = sprites.frame(s, args.frame)
   r = clip(s, r)
-  local img = render(s, frame, args.layer)
+  local img = M.render(s, frame, args.layer)
   local pal = s.palettes[1]
   local rows = {}
   for y = r.y, r.y + r.h - 1 do
