@@ -84,3 +84,19 @@ T.test("approval cards show a label, the summary and the state", function()
   items[1].state = "denied"
   T.eq(R.layout(items, { width = 40, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" }).lines[3].text, "Denied")
 end)
+
+T.test("displayText maps punctuation the UI font lacks to ASCII and drops markdown bold", function()
+  T.eq(R.displayText("Every 3\u{2013}4 floors \u{2014} like this"), "Every 3-4 floors - like this")
+  T.eq(R.displayText("\u{201C}lit\u{201D} and \u{2018}dim\u{2019}\u{2026}"), "\"lit\" and 'dim'...")
+  T.eq(R.displayText("**Vary light, not shape.** Keep it"), "Vary light, not shape. Keep it")
+  T.eq(R.displayText("\u{2022} item \u{2192} 5\u{00D7}4"), "- item -> 5x4")
+  T.eq(R.displayText("h\u{00E9}llo w\u{00F6}rld"), "h\u{00E9}llo w\u{00F6}rld", "accented Latin letters render fine")
+  T.eq(R.displayText("tab\there\rcr"), "tab here cr")
+  T.eq(R.displayText("emoji \u{1F600} and \u{4E2D}"), "emoji ? and ?")
+end)
+
+T.test("layout wraps the display text, so an en dash can't pack two lines into one", function()
+  local items = { { kind = "agent", text = "aaaa 3\u{2013}4 bbbb" } }
+  local lay = R.layout(items, { width = 4, measure = chars, lineHeight = 10, gap = 5, agentLabel = "Claude" })
+  T.deepEq({ lay.lines[2].text, lay.lines[3].text, lay.lines[4].text }, { "aaaa", "3-4", "bbbb" })
+end)

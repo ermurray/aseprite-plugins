@@ -44,6 +44,38 @@ function R.wrap(text, maxWidth, measure)
   return lines
 end
 
+-- Aseprite's UI font lacks most non-Latin glyphs, and an unknown glyph breaks both
+-- measureText and fillText (text overlaps itself). Map common punctuation to ASCII,
+-- keep Latin letters (U+00A0..U+024F), and replace anything else with "?".
+local PUNCT = {
+  [0x2010] = "-", [0x2011] = "-", [0x2012] = "-", [0x2013] = "-", [0x2014] = "-", [0x2015] = "-", [0x2212] = "-",
+  [0x2018] = "'", [0x2019] = "'", [0x201A] = "'", [0x201B] = "'", [0x2032] = "'",
+  [0x201C] = '"', [0x201D] = '"', [0x201E] = '"', [0x2033] = '"',
+  [0x2026] = "...", [0x2022] = "-", [0x00B7] = "-", [0x2023] = "-", [0x25CF] = "-",
+  [0x2192] = "->", [0x2190] = "<-", [0x2194] = "<->", [0x21D2] = "=>",
+  [0x00D7] = "x", [0x2248] = "~", [0x2264] = "<=", [0x2265] = ">=", [0x2260] = "!=",
+  [0x00A0] = " ", [0x2009] = " ", [0x200A] = " ", [0x202F] = " ", [0x200B] = "",
+}
+
+function R.displayText(s)
+  s = s:gsub("%*%*", ""):gsub("[\t\r\f\v]", " ")
+  local ok, out = pcall(function()
+    local parts = {}
+    for _, code in utf8.codes(s) do
+      local mapped = PUNCT[code]
+      if mapped then
+        parts[#parts + 1] = mapped
+      elseif code < 0x80 or (code >= 0xA0 and code <= 0x24F) then
+        parts[#parts + 1] = utf8.char(code)
+      else
+        parts[#parts + 1] = "?"
+      end
+    end
+    return table.concat(parts)
+  end)
+  return ok and out or (s:gsub("[\128-\255]", "?"))
+end
+
 local LABELS = { user = "You" }
 local PREFIX = { activity = "- ", error = "! " }
 local APPROVAL_STATE = {
@@ -63,7 +95,7 @@ function R.layout(items, opts)
       lines[#lines + 1] = { text = label, kind = item.kind .. "_label", y = y }
       y = y + opts.lineHeight
     end
-    for _, l in ipairs(R.wrap((PREFIX[item.kind] or "") .. item.text, opts.width, opts.measure)) do
+    for _, l in ipairs(R.wrap(R.displayText((PREFIX[item.kind] or "") .. item.text), opts.width, opts.measure)) do
       lines[#lines + 1] = { text = l, kind = item.kind, y = y }
       y = y + opts.lineHeight
     end
