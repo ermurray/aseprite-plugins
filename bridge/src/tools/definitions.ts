@@ -572,6 +572,110 @@ export const TOOL_DEFS: ToolDef[] = [
     activity: (a) => `Ran the script "${a.name}"`,
     summarize: (a) => `Run script "${a.name}" once`,
   },
+  {
+    name: "import_from_sprite",
+    kind: "edit",
+    description:
+      "Copy part of another sprite (any project sprite, open or not) into this one as a new layer 'Import: <source> / <layer>', with the pasted pixels selected so the artist can move them. from: source sprite; layer (default: flattened); frame or frames {from,to} (multi-frame imports line up from the current frame, adding frames if needed); region; flip; at {x,y} (default: same position); paletteMode for indexed sprites: nearest (default) or add. Reuses the artist's own art, so it is fine to use freely.",
+    shape: {
+      sprite: spriteArg,
+      from: z.string(),
+      layer: z.string().optional(),
+      frame: frameArg,
+      frames: frameRange.optional(),
+      region: rect().optional(),
+      flip: z.enum(["horizontal", "vertical"]).optional(),
+      at: z.object({ x: z.number().int(), y: z.number().int() }).optional(),
+      paletteMode: z.enum(["nearest", "add"]).optional(),
+    },
+    activity: (a) => `Imported from ${a.from}`,
+    summarize: (a) =>
+      `Import ${a.from}${typeof a.layer === "string" ? ` > "${a.layer}"` : ""} into ${spriteName(a)} as a new layer${a.flip ? ` (flipped ${a.flip === "horizontal" ? "horizontally" : "vertically"})` : ""}`,
+  },
+  {
+    name: "list_clips",
+    kind: "read",
+    description: "List the project's saved clips (name, tags, size, frames, pinned, last used). filter matches name or tags.",
+    shape: { filter: z.string().optional() },
+    activity: () => "Listed the project's clips",
+  },
+  {
+    name: "save_clip",
+    kind: "edit",
+    description: "Save part of a sprite as a reusable clip in the project (selection, or region, or the whole canvas; one layer or flattened; one frame or a range). The library keeps the most recently used clips (default 20); pinned clips are never evicted.",
+    shape: {
+      sprite: spriteArg,
+      layer: z.string().optional(),
+      region: rect().optional(),
+      frame: frameArg,
+      frames: frameRange.optional(),
+      name: z.string().regex(/^[A-Za-z0-9 _-]{1,40}$/),
+      tags: z.array(z.string().max(20)).max(8).optional(),
+      replace: z.boolean().optional(),
+    },
+    activity: (a) => `Saved the clip "${a.name}"`,
+    summarize: (a) => `${a.replace ? "Replace" : "Save"} clip "${a.name}" from ${spriteName(a)}${typeof a.layer === "string" ? ` > "${a.layer}"` : ""}`,
+  },
+  {
+    name: "insert_clip",
+    kind: "edit",
+    description: "Insert a saved clip into a sprite as a new layer 'Clip: <name>' with its pixels selected; at {x,y} (default top-left of the selection or 0,0); flip; paletteMode for indexed sprites.",
+    shape: {
+      sprite: spriteArg,
+      name: z.string(),
+      at: z.object({ x: z.number().int(), y: z.number().int() }).optional(),
+      flip: z.enum(["horizontal", "vertical"]).optional(),
+      paletteMode: z.enum(["nearest", "add"]).optional(),
+    },
+    activity: (a) => `Inserted the clip "${a.name}"`,
+    summarize: (a) => `Insert clip "${a.name}" into ${spriteName(a)} as a new layer`,
+  },
+  {
+    name: "delete_clip",
+    kind: "edit",
+    alwaysAsk: true,
+    description: "Delete a saved clip from the project library.",
+    shape: { name: z.string() },
+    activity: (a) => `Deleted the clip "${a.name}"`,
+    summarize: (a) => `Delete clip "${a.name}" from the project library`,
+  },
+  {
+    name: "pin_clip",
+    kind: "edit",
+    description: "Pin (keep forever) or unpin a clip.",
+    shape: { name: z.string(), pinned: z.boolean() },
+    activity: (a) => `${a.pinned ? "Pinned" : "Unpinned"} the clip "${a.name}"`,
+    summarize: (a) => `${a.pinned ? "Pin" : "Unpin"} clip "${a.name}"`,
+  },
+  {
+    name: "export_sprite",
+    kind: "edit",
+    alwaysAsk: true,
+    description:
+      "Export for games or sharing: png (one frame), frames (one PNG per frame), gif, or sheet (sprite sheet + Aseprite JSON, which Godot/Unity/most engines can import). Optional tag, layer, scale 1-10, sheetType, data hash/array/none, includeNormal (also export the <name>_normal companion as _n). Goes where the project's export settings say (next to the sprite by default) unless destination (a folder) is given.",
+    shape: {
+      sprite: spriteArg,
+      format: z.enum(["png", "frames", "gif", "sheet"]),
+      frame: frameArg,
+      tag: z.string().optional(),
+      layer: z.string().optional(),
+      scale: z.number().int().min(1).max(10).optional(),
+      sheetType: z.enum(["horizontal", "vertical", "rows", "columns", "packed"]).optional(),
+      data: z.enum(["hash", "array", "none"]).optional(),
+      includeNormal: z.boolean().optional(),
+      destination: z.string().min(1).optional(),
+      name: z.string().regex(/^[A-Za-z0-9 _.-]{1,60}$/).optional(),
+    },
+    activity: (a) => `Exported ${spriteName(a)} (${a.format})`,
+    summarize: (a) => {
+      const what = { png: "a PNG", frames: "one PNG per frame", gif: "a GIF", sheet: "a sprite sheet + JSON" }[String(a.format)];
+      const scale = typeof a.scale === "number" && a.scale > 1 ? ` at ${a.scale}x` : "";
+      const tag = typeof a.tag === "string" ? ` (tag "${a.tag}")` : "";
+      const normal = a.includeNormal ? ", plus its normal map (_n)" : "";
+      const dest = typeof a.destination === "string" ? `to ${a.destination}` : "next to the sprite (or per project settings)";
+      return `Export ${spriteName(a)} as ${what}${tag}${scale}${normal}${a.includeNormal ? ", " : " "}${dest}`;
+    },
+  },
 ];
 
 export function toolDef(name: string): ToolDef | undefined {
