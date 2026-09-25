@@ -2,7 +2,7 @@
   "name": "aseprite-agent",
   "displayName": "Agent Chat",
   "description": "Chat with an AI art assistant (Claude first) that helps you make your own pixel art.",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "author": { "name": "ermurray" },
   "license": "MIT",
   "categories": ["Scripts"],
