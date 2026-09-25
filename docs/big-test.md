@@ -7,8 +7,27 @@ Before starting, make:
 - one saved sprite outside any project;
 - a PNG to use as a reference tab.
 
+## 0. Install
+
+Requirements: Claude Code installed and logged in (run `claude` once in a terminal), and Node.js 20 or newer (nodejs.org or `brew install node`; nvm is fine).
+
+1. **Quit Aseprite** completely (Cmd+Q).
+2. **Remove the development copy**, so you test the real package:
+   ```bash
+   rm -rf ~/Library/Application\ Support/Aseprite/extensions/aseprite-agent
+   ```
+3. **Build the package** (skip this if `dist/aseprite-agent-0.9.0.aseprite-extension` already exists):
+   ```bash
+   cd ~/projects/aseprite-plugins && scripts/package.sh
+   ```
+4. **Open Aseprite**, go to **Edit → Preferences → Extensions → Add Extension**, and choose
+   `~/projects/aseprite-plugins/dist/aseprite-agent-0.9.0.aseprite-extension`.
+5. **Restart Aseprite.** If Aseprite asks permission for the extension to run commands or open files, allow it (and note that it asked).
+
+To go back to developing afterwards: remove the extension in Preferences → Extensions, then run `scripts/dev-install.sh`.
+
 ## 1. Install and start
-- [ ] 1.1 Build the package: `scripts/package.sh`. Install `dist/aseprite-agent-0.9.0.aseprite-extension` via Edit → Preferences → Extensions → Add Extension (remove the dev copy first if present), then restart Aseprite.
+- [ ] 1.1 After the install steps above, **Edit → Agent Chat** appears in the menu.
 - [ ] 1.2 **Edit → Agent Chat**. The status shows "Starting the assistant...", then "Connected". No terminal is needed.
 - [ ] 1.3 Bind a key in Edit → Keyboard Shortcuts. The key toggles the window, and the chat is still there after reopening.
 - [ ] 1.4 Kill the bridge (`kill $(python3 -c "import json;print(json.load(open('$HOME/.aseprite-agent/bridge.json'))['pid'])")`) and press **Reconnect**. It restarts automatically.
