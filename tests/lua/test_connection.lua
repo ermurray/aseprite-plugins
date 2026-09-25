@@ -69,3 +69,29 @@ T.test("a missing or stale bridge.json asks for a bridge instead of dialing a de
   T.eq(app.fs.isFile(app.fs.joinPath(home, "bridge.json")), false, "stale file removed")
   Connection.infoPath = realPath
 end)
+
+T.test("a live pid that isn't the bridge counts as stale", function()
+  local home = F.unique("agent home2")
+  app.fs.makeAllDirectories(home)
+  local asked = {}
+  local c = Connection.new{ onMessage = function() end, onStatus = function() end, onNeedsBridge = function(r) asked[#asked + 1] = r end }
+  local realPath = Connection.infoPath
+  Connection.infoPath = function() return app.fs.joinPath(home, "bridge.json") end
+  local p = io.popen("echo $PPID"); local aseprite = p:read("l"); p:close()
+  local f = io.open(app.fs.joinPath(home, "bridge.json"), "w")
+  f:write('{"port":47998,"token":"t","pid":' .. aseprite .. '}'); f:close()
+  T.eq(c:connect(), false)
+  T.eq(asked[1], "stale")
+  Connection.infoPath = realPath
+end)
+
+T.test("a socket that closes before it ever opened asks for a new bridge", function()
+  local asked = {}
+  local c = Connection.new{ onMessage = function() end, onStatus = function() end, onNeedsBridge = function(r) asked[#asked + 1] = r end }
+  c.opened = false
+  c:onReceive(WebSocketMessageType.CLOSE, "", "refused")
+  T.eq(asked[1], "unreachable")
+  c.opened = true
+  c:onReceive(WebSocketMessageType.CLOSE, "", "bye")
+  T.eq(#asked, 1, "a normal disconnect after OPEN just reconnects")
+end)

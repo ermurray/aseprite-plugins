@@ -193,7 +193,7 @@ T.test("the Clips button explains that clips need a project", function()
   ChatWindow.showTip = real
 end)
 
-T.test("startBridge reports a missing Node clearly and doesn't retry in a tight loop", function()
+T.test("startBridge reports a missing Node clearly, and a failed start can be retried at once", function()
   local launcher = require("agent.launcher")
   local realStart = launcher.start
   local calls = 0
@@ -202,7 +202,27 @@ T.test("startBridge reports a missing Node clearly and doesn't retry in a tight 
   w.pluginPath = "/nowhere"
   w:startBridge("missing")
   w:startBridge("missing")
-  T.eq(calls, 1, "a second request within 15s doesn't start again")
+  T.eq(calls, 2, "a failed start isn't throttled, so installing Node then pressing Reconnect works")
   T.eq(w.model.items[#w.model.items].text, "Node.js 20 or newer is needed to run the assistant.\nInstall it")
   launcher.start = realStart
+end)
+
+T.test("startBridge throttles by wall time, says so, and never leaves two timers running", function()
+  local launcher = require("agent.launcher")
+  local realStart, realNow = launcher.start, ChatWindow.now
+  local calls, t = 0, 1000
+  launcher.start = function() calls = calls + 1; return { ok = true, log = "/tmp/x.log" } end
+  ChatWindow.now = function() return t end
+  local w = stubbed({})
+  w:startBridge("missing")
+  local first = w.startTimer
+  w:startBridge("missing")
+  T.eq(calls, 1)
+  T.eq(w.model.items[#w.model.items].text, "Still starting the assistant...")
+  t = t + 20
+  w:startBridge("missing")
+  T.eq(calls, 2, "allowed again after 15 seconds of wall time")
+  T.eq(first.isRunning, false, "the older poll timer is stopped")
+  w.startTimer:stop()
+  launcher.start, ChatWindow.now = realStart, realNow
 end)

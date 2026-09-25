@@ -227,11 +227,18 @@ function ChatWindow:toggle()
 end
 
 -- Starts the bundled bridge (at most once per 15s) and keeps trying to connect for 15s.
+ChatWindow.now = os.time -- wall-clock seconds (replaceable in tests)
+
 function ChatWindow:startBridge(reason)
-  local now = os.clock()
-  if self.lastStart and now - self.lastStart < 15 then return end
-  self.lastStart = now
+  local now = ChatWindow.now()
+  if self.lastStart and now - self.lastStart < 15 then
+    self.model:addNotice("Still starting the assistant...")
+    self:repaint()
+    return
+  end
   local r = launcher.start(self.pluginPath or "", { preferred = self.opts.prefs.nodePath })
+  -- Only a start that actually launched is throttled; after a failure (e.g. no Node) the artist can retry at once.
+  if r.ok then self.lastStart = now end
   if not r.ok then
     self.model:addLocalError(r.error, r.hint)
     self:repaint()
@@ -239,23 +246,26 @@ function ChatWindow:startBridge(reason)
   end
   if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT.starting } end
   local tries = 0
-  self.startTimer = Timer{
+  if self.startTimer then self.startTimer:stop() end
+  local timer
+  timer = Timer{
     interval = 0.5,
     ontick = function()
       tries = tries + 1
       local info = Connection.readBridgeInfo(Connection.infoPath())
       if info then
-        self.startTimer:stop()
+        timer:stop()
         self.conn:connect()
       elseif tries >= 30 then
-        self.startTimer:stop()
+        timer:stop()
         self.model:addLocalError("The assistant's bridge didn't start.", "See " .. r.log .. ".")
         if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT.disconnected } end
         self:repaint()
       end
     end,
   }
-  self.startTimer:start()
+  self.startTimer = timer
+  timer:start()
 end
 
 -- Full shutdown (extension unload).

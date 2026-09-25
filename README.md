@@ -9,7 +9,7 @@ An Aseprite extension with a chat window that connects an AI agent (Claude first
 3. Download `aseprite-agent-<version>.aseprite-extension` and open it with Aseprite
    (or Edit > Preferences > Extensions > Add Extension), then restart Aseprite.
 4. Edit > Agent Chat (bind a key in Edit > Keyboard Shortcuts). The assistant starts by itself
-   the first time; it stops after 15 minutes without an open chat window.
+   the first time; it stops by itself about 15 minutes after Aseprite closes.
 
 ## What it does
 
@@ -26,7 +26,7 @@ Requirements: Aseprite ≥ 1.3.18, Node ≥ 20, Claude Code installed and logged
 
 ```bash
 cd bridge && npm install && npm run build
-npm start                    # bridge on 127.0.0.1:47821, writes ~/.aseprite-agent/bridge.json
+ASEPRITE_AGENT_IDLE_MINUTES=0 npm start   # bridge on 127.0.0.1:47821 (0 = never idle-stop while developing)
 scripts/dev-install.sh       # copy the extension + bundled bridge into Aseprite (re-run after changes), then restart Aseprite
 scripts/package.sh           # build dist/aseprite-agent-<version>.aseprite-extension
 ```

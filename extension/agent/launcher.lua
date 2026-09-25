@@ -1,7 +1,8 @@
 -- Finds Node 20+ and starts the bundled bridge in the background (macOS/Linux).
 local M = { MIN_MAJOR = 20 }
 
-local function q(s) return '"' .. tostring(s):gsub('"', '\\"') .. '"' end
+-- Single quotes: nothing inside expands ($, backticks, backslashes); embedded ' becomes '\''.
+local function q(s) return "'" .. tostring(s):gsub("'", "'\\''") .. "'" end
 
 function M.parseVersion(text)
   local a, b, c = tostring(text or ""):match("v(%d+)%.(%d+)%.(%d+)")
@@ -51,9 +52,12 @@ end
 function M.findNode(opts)
   local env = setmetatable({}, { __index = function(_, k) return os.getenv(k) end })
   local home = os.getenv("HOME") or ""
+  -- A Node the artist chose explicitly wins, as long as it is new enough.
+  for _, explicit in ipairs{ opts and opts.preferred, env.ASEPRITE_AGENT_NODE } do
+    if explicit and (versionOf(explicit) or 0) >= M.MIN_MAJOR then return explicit, 1 end
+  end
   local list = {}
   local paths = M.candidates(env, home)
-  if opts and opts.preferred then table.insert(paths, 1, opts.preferred) end
   local p = io.popen("/bin/sh -lc 'command -v node' 2>/dev/null")
   if p then
     local found = p:read("l")
@@ -75,8 +79,18 @@ function M.pidAlive(pid)
   return os.execute("kill -0 " .. math.floor(pid) .. " 2>/dev/null") == true
 end
 
+-- True only for a live process that is actually running our bridge (pids get reused after reboots).
+function M.isBridgePid(pid)
+  if not M.pidAlive(pid) then return false end
+  local p = io.popen("ps -p " .. math.floor(tonumber(pid)) .. " -o command= 2>/dev/null")
+  if not p then return false end
+  local cmd = p:read("a") or ""
+  p:close()
+  return cmd:find("bridge.mjs", 1, true) ~= nil or cmd:find("dist/main.js", 1, true) ~= nil or cmd:find("src/main.ts", 1, true) ~= nil
+end
+
 function M.startCommand(node, script, log)
-  return "nohup " .. q(node) .. " " .. q(script) .. " > " .. q(log) .. " 2>&1 &"
+  return "nohup " .. q(node) .. " " .. q(script) .. " >> " .. q(log) .. " 2>&1 &"
 end
 
 function M.agentHome()
