@@ -22,7 +22,7 @@ T.test("with no sprite, the current-palette entry is left out", function()
   T.eq(palettes.list(nil)[1].label, "None")
 end)
 
-local root = app.fs.joinPath(F.tmp, "brief tests " .. os.time())
+local root = F.unique("brief tests ")
 app.fs.makeAllDirectories(root)
 project.create(root, { resolution = "32x32", light = "top-left", notes = "Cozy" })
 

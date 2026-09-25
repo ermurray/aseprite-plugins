@@ -3,6 +3,7 @@ package.path = app.fs.joinPath(root, "extension", "?.lua") .. ";"
   .. app.fs.joinPath(root, "extension", "?", "init.lua") .. ";"
   .. app.fs.joinPath(root, "tests", "lua", "?.lua") .. ";" .. package.path
 
+math.randomseed(os.time() + math.floor(os.clock() * 1e6))
 local T = require("testlib")
 local only = app.params.only or ""
 local suites = {

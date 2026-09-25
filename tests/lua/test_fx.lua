@@ -70,7 +70,7 @@ end)
 
 T.test("snap_to_palette reads the project's palette.gpl", function()
   F.closeAll()
-  local root = app.fs.joinPath(F.tmp, "fx proj " .. os.time())
+  local root = F.unique("fx proj ")
   app.fs.makeAllDirectories(root)
   if not app.fs.isDirectory(app.fs.joinPath(root, ".artproject")) then project.create(root, {}) end
   local pal = Palette(1)
