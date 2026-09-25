@@ -156,12 +156,20 @@ function ChatWindow:show()
   if self.conn.status == "disconnected" then self.conn:connect() end
 end
 
-function ChatWindow:setProject(root, silent)
+-- Where tools resolve sprites and what the header shows.
+function ChatWindow:setProjectLocal(root)
   self.projectRoot = root
   sprites.projectRoot = root
   self.projectName = root and app.fs.fileName(root) or "No project"
   self:syncProjectHeader()
   self:maybeShowSetupHint()
+end
+
+function ChatWindow:setProject(root, silent)
+  -- While Claude is replying, the bridge finishes the reply in the old project first, so tools
+  -- keep resolving there too; the switch happens when the bridge's conversation message arrives.
+  self.pendingRoot = root
+  if not (self.busy and self.conn.status == "connected") then self:setProjectLocal(root) end
   if not silent and self.conn.status == "connected" then
     self.conn:send{ type = "open_project", projectRoot = root, conversationId = prefs.getConversation(self.opts.prefs, root) }
   end
@@ -182,8 +190,10 @@ end
 function ChatWindow:onSiteChange()
   local s = app.sprite
   if not s or app.fs.filePath(s.filename) == "" then return end
+  local ext = app.fs.fileExtension(s.filename):lower()
+  if ext ~= "aseprite" and ext ~= "ase" then return end -- reference images don't pick the project
   local root = project.findRoot(s.filename)
-  if root ~= self.projectRoot then self:setProject(root) end
+  if root ~= (self.pendingRoot or self.projectRoot) then self:setProject(root) end
 end
 
 function ChatWindow:syncProjectHeader()
@@ -317,12 +327,14 @@ function ChatWindow:onMessage(m)
     if tip then ChatWindow.showTip(tip) end
   end
   if m.type == "ready" or m.type == "conversation" then
-    prefs.setConversation(self.opts.prefs, m.projectRoot, m.conversationId)
-    if m.projectName then
-      self.projectName = m.projectName
-      self:syncProjectHeader()
-    end
+    -- The bridge's project is authoritative (it may have rejected a root, or finished a deferred switch).
+    local root = m.projectRoot
+    if type(root) ~= "string" then root = nil end
+    prefs.setConversation(self.opts.prefs, root, m.conversationId)
+    self.pendingRoot = nil
+    self:setProjectLocal(root)
     if m.history then self.model:loadHistory(m.history, { dropLocal = m.type == "conversation" }) end
+    self:maybeShowSetupHint()
     self.followTail = true
     self:syncButtons()
   end

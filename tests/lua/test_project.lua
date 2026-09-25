@@ -53,3 +53,21 @@ T.test("ancestors lists the file's folder first", function()
   local list = project.ancestors(app.fs.joinPath(game, "chars", "hero.aseprite"), 3)
   T.deepEq(list, { app.fs.joinPath(game, "chars"), game, base })
 end)
+
+T.test("listSprites stops at a depth limit (no runaway walks)", function()
+  local deep = app.fs.joinPath(base, "deep")
+  local dir = deep
+  for i = 1, 10 do dir = app.fs.joinPath(dir, "d" .. i) end
+  app.fs.makeAllDirectories(dir)
+  touch(app.fs.joinPath(dir, "too-deep.aseprite"))
+  touch(app.fs.joinPath(deep, "d1", "shallow.aseprite"))
+  local list = project.listSprites(deep)
+  T.deepEq(list, { "d1/shallow.aseprite" })
+end)
+
+T.test("ancestors never offer the home folder or the filesystem root", function()
+  local home = os.getenv("HOME")
+  for _, dir in ipairs(project.ancestors(app.fs.joinPath(home, "a", "b", "c.aseprite"), 10)) do
+    T.eq(dir ~= home and dir ~= "/" and dir ~= "", true, dir)
+  end
+end)

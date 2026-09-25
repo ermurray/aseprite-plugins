@@ -20,7 +20,14 @@ function M.resolve(ref)
     return s
   end
   for _, s in ipairs(app.sprites) do
-    if s.filename == ref or app.fs.fileName(s.filename) == ref or M.name(s) == ref then return s end
+    if s.filename == ref or M.name(s) == ref then return s end
+  end
+  -- A bare file name matches an open sprite elsewhere only if the project has no file at that exact path.
+  local exactFile = M.projectRoot and app.fs.isFile(project.absolute(M.projectRoot, ref))
+  if not exactFile then
+    for _, s in ipairs(app.sprites) do
+      if app.fs.fileName(s.filename) == ref then return s end
+    end
   end
   error("Sprite '" .. ref .. "' is not open. Open sprites: " .. M.openList(), 0)
 end

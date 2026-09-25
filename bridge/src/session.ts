@@ -39,7 +39,7 @@ export class Session {
   private approvals = new Map<string, (approved: boolean) => void>();
   private turnCancelled = false;
   private projectRoot: string | null = null;
-  private pendingProject?: { root: string | null; conversationId?: string };
+  private pendingProject?: { root: string | null; conversationId?: string; adopt?: string };
   private lastContext?: MessageContext;
   private conv: Conversation = new ConversationStore("").create();
   private history = new HistoryRecorder(this.conv.items);
@@ -54,6 +54,7 @@ export class Session {
     return {
       call: async (name, args) => {
         if (stale()) return { ok: false, error: "Chat reset" };
+        if (this.turnCancelled) return { ok: false, error: "Cancelled by user" };
         const def = toolDef(name);
         if (!def) return { ok: false, error: `Unknown tool: ${name}` };
         if (def.kind === "edit") {
@@ -88,7 +89,15 @@ export class Session {
     });
   }
 
-  async handleRaw(raw: string): Promise<void> {
+  private queue: Promise<void> = Promise.resolve();
+
+  /** Messages are handled strictly in order; a reply runs in the background so tool results keep flowing. */
+  handleRaw(raw: string): Promise<void> {
+    this.queue = this.queue.then(() => this.handle(raw)).catch((e) => console.error(`Bridge message failed: ${(e as Error).message}`));
+    return this.queue;
+  }
+
+  private async handle(raw: string): Promise<void> {
     const parsed = parseExtensionMessage(raw);
     if (!this.authed) {
       if (!parsed.ok || parsed.message.type !== "hello" || !tokensMatch(parsed.message.token, this.deps.token)) {
@@ -118,7 +127,8 @@ export class Session {
       case "hello":
         return;
       case "user_message":
-        return this.runTurn(msg.text, msg.context, msg.attach);
+        void this.runTurn(msg.text, msg.context, msg.attach);
+        return;
       case "cancel":
         this.cancel("Cancelled by user");
         return;
@@ -140,23 +150,11 @@ export class Session {
         return;
       case "open_project": {
         const root = await this.validRoot(msg.projectRoot);
-        if (msg.adoptConversationId && root && msg.adoptConversationId === this.conv.id && !this.busy) {
-          const from = this.store();
-          const to = this.deps.stores?.get(root);
-          if (to && from !== to) {
-            await to.save(this.conv);
-            await from?.remove(this.conv.id);
-          }
-          await this.openProject(root, this.conv.id);
-          this.deps.send(this.conversationMessage());
-          return;
-        }
         if (this.busy) {
-          this.pendingProject = { root, conversationId: msg.conversationId };
+          this.pendingProject = { root, conversationId: msg.conversationId, adopt: msg.adoptConversationId };
           return;
         }
-        await this.openProject(root, msg.conversationId);
-        this.deps.send(this.conversationMessage());
+        await this.applyProject(root, msg.conversationId, msg.adoptConversationId);
         return;
       }
       case "list_history":
@@ -195,7 +193,32 @@ export class Session {
   }
 
 
+  /** Switches project; with `adopt` (the current chat's id) the chat moves into the project. */
+  private async applyProject(root: string | null, conversationId?: string, adopt?: string): Promise<void> {
+    if (adopt && root && adopt === this.conv.id) {
+      const from = this.store();
+      const to = this.deps.stores?.get(root);
+      if (to && from !== to) {
+        try {
+          await to.save(this.conv);
+        } catch (e) {
+          this.deps.send({ type: "error", message: "Couldn't move this chat into the project.", hint: (e as Error).message });
+          return;
+        }
+        await from?.remove(this.conv.id).catch(() => {});
+      }
+      conversationId = this.conv.id;
+    }
+    await this.openProject(root, conversationId);
+    this.deps.send(this.conversationMessage());
+  }
+
   private startNewChat(): void {
+    // A project switch that was waiting for the reply to end applies to the new chat.
+    if (this.pendingProject) {
+      this.projectRoot = this.pendingProject.root;
+      this.pendingProject = undefined;
+    }
     this.cancel("Chat reset");
     this.useConversation(this.newConversation());
     this.busy = false;
@@ -240,7 +263,7 @@ export class Session {
     const summary = def.summarize!(args);
     const open = this.lastContext?.openSprites;
     const sprite = args.sprite;
-    if (typeof sprite === "string" && open && !open.includes(sprite) && !open.some((o) => o.endsWith(`/${sprite}`))) {
+    if (typeof sprite === "string" && open && !open.includes(sprite)) {
       return `${summary} (opens it as a tab)`;
     }
     return summary;
@@ -271,8 +294,10 @@ export class Session {
     this.deps.send(m);
   }
 
-  private async persist(conv: Conversation, adapter: Adapter, store: ConversationStore | undefined): Promise<void> {
+  private async persist(conv: Conversation, adapter: Adapter, store: ConversationStore | undefined, root: string | null): Promise<void> {
     if (!store) return;
+    // Never recreate a project folder the artist deleted while it was open.
+    if (root && !(await isProjectRoot(root))) return;
     conv.title = new HistoryRecorder(conv.items).title();
     conv.resume = adapter.resumeState() ?? conv.resume;
     try {
@@ -297,11 +322,12 @@ export class Session {
     const adapter = this.adapter!;
     const conv = this.conv;
     const store = this.store();
+    const root = this.projectRoot;
     const current = () => this.adapter === adapter;
     this.lastContext = context;
     this.turnCancelled = false;
     this.history.user(text);
-    await this.persist(conv, adapter, store);
+    await this.persist(conv, adapter, store, root);
     try {
       // Stop, New chat or a disconnect during that save: don't start Claude at all.
       if (!current() || this.turnCancelled) return;
@@ -316,7 +342,7 @@ export class Session {
       if (current()) this.emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {
       if (current()) this.history.endTurn();
-      await this.persist(conv, adapter, store);
+      await this.persist(conv, adapter, store, root);
       // A turn orphaned by New chat ends silently; the new chat is already idle.
       if (current()) {
         this.busy = false;
@@ -325,8 +351,7 @@ export class Session {
       if (current() && this.pendingProject) {
         const next = this.pendingProject;
         this.pendingProject = undefined;
-        await this.openProject(next.root, next.conversationId);
-        this.deps.send(this.conversationMessage());
+        await this.applyProject(next.root, next.conversationId, next.adopt);
       }
     }
   }

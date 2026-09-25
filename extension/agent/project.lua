@@ -29,32 +29,40 @@ function M.absolute(root, rel)
   return app.fs.normalizePath(app.fs.joinPath(table.unpack(parts)))
 end
 
+M.MAX_DEPTH, M.MAX_FILES = 6, 2000
+
+-- Sprites under root, bounded in depth and count so a huge folder or a symlink loop can't
+-- freeze Aseprite (the Lua fs API can't tell symlinks apart).
 function M.listSprites(root)
   local out = {}
-  local function walk(dir, rel)
+  local function walk(dir, rel, depth)
+    if depth > M.MAX_DEPTH or #out >= M.MAX_FILES then return end
     for _, name in ipairs(app.fs.listFiles(dir)) do
       local full = app.fs.joinPath(dir, name)
       local r = rel == "" and name or (rel .. "/" .. name)
       if app.fs.isDirectory(full) then
-        if name:sub(1, 1) ~= "." then walk(full, r) end
+        if name:sub(1, 1) ~= "." then walk(full, r, depth + 1) end
       else
         local ext = app.fs.fileExtension(name):lower()
         if ext == "aseprite" or ext == "ase" then out[#out + 1] = r end
       end
     end
   end
-  walk(root, "")
+  walk(root, "", 1)
   table.sort(out)
   return out
 end
 
+-- Candidate project folders for a sprite: its folder, then parents, but never the home
+-- folder or the filesystem root (too big to be one project).
 function M.ancestors(path, max)
   local out = {}
+  local home = os.getenv("HOME") or os.getenv("USERPROFILE")
   local dir = app.fs.filePath(path)
   while dir ~= "" and #out < (max or 5) do
-    out[#out + 1] = dir
     local parent = app.fs.filePath(trimSep(dir))
-    if parent == dir then break end
+    if dir == home or parent == "" or parent == dir then break end
+    out[#out + 1] = dir
     dir = parent
   end
   return out

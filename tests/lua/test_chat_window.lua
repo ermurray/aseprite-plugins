@@ -135,3 +135,49 @@ T.test("finishSetup switches to the new project and brings the current chat alon
   T.eq(w.sent[#w.sent].adoptConversationId, nil)
   sprites.projectRoot = nil
 end)
+
+T.test("while Claude is busy, a tab switch waits for the bridge before tools change project", function()
+  F.closeAll()
+  local w = stubbed({})
+  w.conn.status = "connected"
+  w.busy = true
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(root, "busy.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  T.eq(w.sent[#w.sent].type, "open_project")
+  T.eq(sprites.projectRoot, nil, "tools keep resolving against the old project")
+  w:onMessage{ type = "conversation", conversationId = "c1", projectRoot = root, projectName = "p", history = json.decode("[]") }
+  T.eq(sprites.projectRoot, root)
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("reference tabs outside the project don't switch the chat away", function()
+  F.closeAll()
+  local w = stubbed({})
+  w:setProject(root)
+  local elsewhere = app.fs.joinPath(F.tmp, "refs " .. os.time())
+  app.fs.makeAllDirectories(elsewhere)
+  local ref = Sprite(2, 2)
+  ref:saveAs(app.fs.joinPath(elsewhere, "ref.png"))
+  app.sprite = ref
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("the setup hint survives the bridge's conversation reply", function()
+  F.closeAll()
+  local w = stubbed({})
+  local loose = app.fs.joinPath(F.tmp, "loose2 " .. os.time())
+  app.fs.makeAllDirectories(loose)
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(loose, "l.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  w:onMessage{ type = "conversation", conversationId = "g", projectName = "No project", history = json.decode("[]") }
+  local hint = false
+  for _, it in ipairs(w.model.items) do if it.kind == "setup" then hint = true end end
+  T.eq(hint, true)
+end)

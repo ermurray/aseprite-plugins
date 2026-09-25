@@ -231,4 +231,79 @@ describe("projects", () => {
     expect(conv.projectRoot).toBeNull();
     expect(await readdir(plain)).toEqual([]);
   });
+
+  it("New chat while a project switch is pending starts the new chat in the new project", async () => {
+    let release!: () => void;
+    await setup({ hold: new Promise<void>((r) => (release = r)) });
+    const a = await makeProject();
+    const b = await makeProject();
+    const { c } = await hello({ projectRoot: a });
+    c.send({ type: "user_message", text: "long" });
+    await new Promise((r) => setTimeout(r, 20));
+    c.send({ type: "open_project", projectRoot: b });
+    c.send({ type: "new_chat" });
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv.projectRoot).toBe(b);
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(c.received.filter((m) => m.type === "conversation")).toHaveLength(1);
+  });
+
+  it("adopting while Claude is busy happens after the reply, and keeps the chat", async () => {
+    let release!: () => void;
+    await setup({ hold: new Promise<void>((r) => (release = r)) });
+    const { c, ready } = await hello();
+    c.send({ type: "user_message", text: "keep me" });
+    await new Promise((r) => setTimeout(r, 20));
+    const root = await makeProject();
+    c.send({ type: "open_project", projectRoot: root, adoptConversationId: ready.conversationId });
+    release();
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv).toMatchObject({ projectRoot: root, conversationId: ready.conversationId });
+    expect(conv.history[0]).toEqual({ kind: "user", text: "keep me" });
+  });
+
+  it("a failed adopt reports an error, keeps the chat where it was, and keeps the bridge alive", async () => {
+    await setup();
+    const { c, ready } = await hello();
+    await turn(c, { text: "precious" });
+    const root = await makeProject();
+    const { chmod } = await import("node:fs/promises");
+    await chmod(join(root, ".artproject"), 0o500);
+    try {
+      c.send({ type: "open_project", projectRoot: root, adoptConversationId: ready.conversationId });
+      const err = (await c.waitFor((m) => m.type === "error")) as any;
+      expect(err.message).toContain("Couldn't move this chat");
+      c.send({ type: "list_history" });
+      const list = (await c.waitFor((m) => m.type === "history_list")) as any;
+      expect(list.items.map((i: any) => i.id)).toContain(ready.conversationId);
+    } finally {
+      await chmod(join(root, ".artproject"), 0o700);
+    }
+  });
+
+  it("does not recreate a deleted .artproject folder when saving", async () => {
+    await setup();
+    const root = await makeProject();
+    const { c } = await hello({ projectRoot: root });
+    await turn(c, { text: "one" });
+    const { rm, access } = await import("node:fs/promises");
+    await rm(join(root, ".artproject"), { recursive: true, force: true });
+    await turn(c, { text: "two" });
+    await expect(access(join(root, ".artproject"))).rejects.toThrow();
+  });
+
+  it("the opens-as-tab note compares exact project paths", async () => {
+    await setup({
+      toolCalls: async (tools) => {
+        await tools.call("layer_ops", { sprite: "knight.aseprite", action: "add", name: "A" });
+      },
+    });
+    const { c } = await hello();
+    c.send({ type: "user_message", text: "x", context: { activeSprite: "sub/knight.aseprite", openSprites: ["sub/knight.aseprite"] } });
+    const req = (await c.waitFor((m) => m.type === "approval_request")) as any;
+    expect(req.summary).toContain("(opens it as a tab)");
+    c.send({ type: "approval", approvalId: req.approvalId, approved: false });
+    await c.waitFor((m) => m.type === "turn_done");
+  });
 });

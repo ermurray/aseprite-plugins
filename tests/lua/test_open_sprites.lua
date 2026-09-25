@@ -79,3 +79,15 @@ end)
 
 sprites.projectRoot = nil
 F.closeAll()
+
+T.test("an exact project path wins over a same-named open sprite in another folder", function()
+  setup()
+  local sub = Sprite(3, 3)
+  app.fs.makeAllDirectories(app.fs.joinPath(root, "sub"))
+  sub:saveAs(project.absolute(root, "sub/knight.aseprite"))
+  saveSprite("knight.aseprite", 5)
+  local r = call("get_sprite_info", { sprite = "knight.aseprite" })
+  T.eq(r.ok, true, r.error)
+  T.eq(r.data.width, 5, "read the unopened root-level knight, not the open sub/knight")
+  sprites.projectRoot = nil
+end)
