@@ -23,7 +23,9 @@ end
 -- Iterates the target rectangle in sprite coordinates, giving image coordinates too.
 local function each(r, o, fn)
   for y = r.y, r.y + r.h - 1 do
-    for x = r.x, r.x + r.w - 1 do fn(x, y, x - o.x, y - o.y) end
+    for x = r.x, r.x + r.w - 1 do
+      if r.inside(x, y) then fn(x, y, x - o.x, y - o.y) end
+    end
   end
 end
 
@@ -76,8 +78,14 @@ function M.pixel_perfect(args)
       end
     end
     local removed = fxm.pixelPerfectRemovals(opaque, r.w, r.h)
-    for _, p in ipairs(removed) do img:drawPixel(r.x + p.x - o.x, r.y + p.y - o.y, 0) end
-    return #removed
+    local n = 0
+    for _, p in ipairs(removed) do
+      if r.inside(r.x + p.x, r.y + p.y) then
+        img:drawPixel(r.x + p.x - o.x, r.y + p.y - o.y, 0)
+        n = n + 1
+      end
+    end
+    return n
   end)
   return result(s, layers, n)
 end
@@ -102,6 +110,7 @@ local function paletteColors(s, which)
       set[c.red * 65536 + c.green * 256 + c.blue] = true
     end
   end
+  if #list == 0 then error("That palette has no opaque colors to snap to.", 0) end
   return list, set
 end
 
@@ -184,6 +193,7 @@ end
 local function newLayerBelow(s, source, name)
   local l = s:newLayer()
   l.name = name
+  l.parent = source.parent
   l.stackIndex = source.stackIndex
   return l
 end
@@ -233,7 +243,9 @@ function M.layer_style(args)
         local dx, dy = args.offsetX or 1, args.offsetY or 1
         for y = 0, h - 1 do
           for x = 0, w - 1 do
-            if opaque[y * w + x + 1] and x + dx >= 0 and y + dy >= 0 and x + dx < w and y + dy < h then
+            local sx, sy = x + o.x, y + o.y
+            local inTarget = sx >= r.x and sy >= r.y and sx < r.x + r.w and sy < r.y + r.h and r.inside(sx, sy)
+            if opaque[y * w + x + 1] and inTarget and x + dx >= 0 and y + dy >= 0 and x + dx < w and y + dy < h then
               out:drawPixel(x + dx, y + dy, value)
               total = total + 1
             end

@@ -17,6 +17,8 @@ export interface ToolDef {
   summarize?(args: Record<string, unknown>): string;
   /** The tool name and args actually sent to the extension. Defaults to this tool's own. */
   forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
+  /** Always show the approval card, even with auto-approve on (code execution, Aseprite commands). */
+  alwaysAsk?: boolean;
   /** Tools the bridge runs itself (no extension round-trip). */
   runInBridge?(args: Record<string, unknown>, env: { projectRoot: string | null }): Promise<ToolResult>;
 }
@@ -44,6 +46,8 @@ const layerArg2 = z.string().describe("Layer to work on.");
 const allFramesArg = z.boolean().optional().describe("Apply to every frame (default: the given or active frame only).");
 const regionArg = rect().optional().describe("Limit to this rectangle (default: the selection if any, else the whole canvas).");
 const fxTarget = { sprite: spriteArg, layer: layerArg2, frame: frameArg, allFrames: allFramesArg, region: regionArg };
+// Tab and newline are fine in code; any other control character could hide code from the card.
+const noHiddenChars = (s: string) => !/[\u0000-\u0008\u000b\u000c\u000d\u000e-\u001f\u007f]/.test(s);
 const where = (a: Record<string, unknown>) => `${target(a)}${a.allFrames ? ", all frames" : typeof a.frame === "number" ? `, frame ${a.frame}` : ""}`;
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -537,27 +541,32 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "run_extension_command",
     kind: "edit",
+    alwaysAsk: true,
     description: "Run an Aseprite command by id, e.g. one added by an installed extension (its author names it). Some built-in commands (quit, save, close, options, scripts) are refused. Check list_installed_extensions first.",
     shape: { command: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/) },
     activity: (a) => `Ran the ${a.command} command`,
-    summarize: (a) => `Run the Aseprite command "${a.command}"`,
+    summarize: (a) => `Run the Aseprite command "${a.command}" (not undoable as one step)`,
   },
   {
     name: "write_script",
     kind: "edit",
+    alwaysAsk: true,
     description:
       "Save a Lua script for a repetitive job to the artist's File > Scripts > Agent menu. The artist sees the full code on the approval card. Keep it short and commented; wrap sprite edits in app.transaction. Run it with run_script (separate approval).",
     shape: {
       name: z.string().regex(/^[A-Za-z0-9 _-]{1,60}$/),
-      description: z.string().min(1).max(200),
-      code: z.string().min(1).max(20000),
+      description: z.string().min(1).max(200).refine(noHiddenChars, "no control characters"),
+      code: z.string().min(1).max(20000).refine(noHiddenChars, "no control characters other than tab and newline"),
+      replace: z.boolean().optional().describe("Set true to overwrite an existing script with this name."),
     },
     activity: (a) => `Saved the script "${a.name}"`,
-    summarize: (a) => `Save script "${a.name}" to File > Scripts > Agent: ${a.description}\n\n${a.code}`,
+    summarize: (a) =>
+      `${a.replace ? `Replace the script "${a.name}" in` : `Save script "${a.name}" to`} File > Scripts > Agent: ${a.description}\n\n${a.code}`,
   },
   {
     name: "run_script",
     kind: "edit",
+    alwaysAsk: true,
     description: "Run a script saved in File > Scripts > Agent once. Edits run as one undo step; printed output and errors come back to you.",
     shape: { name: z.string().regex(/^[A-Za-z0-9 _-]{1,60}$/) },
     activity: (a) => `Ran the script "${a.name}"`,

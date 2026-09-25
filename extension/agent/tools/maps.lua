@@ -46,17 +46,24 @@ end
 local function writeCompanion(s, path, layerName, render)
   local prev = app.sprite
   local out = Sprite(s.width, s.height, ColorMode.RGB)
-  for i = 2, #s.frames do out:newEmptyFrame(i) end
-  for i, f in ipairs(s.frames) do out.frames[i].duration = f.duration end
-  out.layers[1].name = layerName
-  for i, f in ipairs(s.frames) do
-    local img = render(f)
-    local cel = out.layers[1]:cel(i)
-    if cel then cel.image = img; cel.position = Point(0, 0) else out:newCel(out.layers[1], i, img, Point(0, 0)) end
-  end
-  out:saveAs(path)
-  out:close()
-  if prev then app.sprite = prev end
+  local ok, err = pcall(function()
+    for i = 2, #s.frames do out:newEmptyFrame(i) end
+    for i, f in ipairs(s.frames) do out.frames[i].duration = f.duration end
+    out.layers[1].name = layerName
+    for i, f in ipairs(s.frames) do
+      local img = render(f)
+      local cel = out.layers[1]:cel(i)
+      if cel then cel.image = img; cel.position = Point(0, 0) else out:newCel(out.layers[1], i, img, Point(0, 0)) end
+    end
+    -- saveAs doesn't raise on failure, so remove the old (generated) file first and check after.
+    if app.fs.isFile(path) and not os.remove(path) then error("Couldn't replace " .. app.fs.fileName(path) .. ".", 0) end
+    out:saveAs(path)
+    if not app.fs.isFile(path) then error("Couldn't save " .. app.fs.fileName(path) .. " (is the folder writable?).", 0) end
+  end)
+  -- Never leave a half-made companion tab behind, and give the artist their tab back.
+  pcall(function() out:close() end)
+  if prev then pcall(function() app.sprite = prev end) end
+  if not ok then error(tostring(err), 0) end
 end
 
 function M.make_normal_map(args)

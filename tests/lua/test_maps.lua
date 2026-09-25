@@ -79,3 +79,19 @@ T.test("light_preview renders a lit image and leaves the sprite alone", function
 end)
 
 F.closeAll()
+
+T.test("a failed companion save closes the half-made sprite and restores the tab", function()
+  F.closeAll()
+  local ro = F.unique("readonly")
+  app.fs.makeAllDirectories(ro)
+  local s = Sprite(3, 3)
+  local img = s.cels[1].image:clone(); img:clear(pc.rgba(9, 9, 9, 255)); s.cels[1].image = img
+  s:saveAs(app.fs.joinPath(ro, "locked.aseprite"))
+  app.sprite = s
+  os.execute('chmod 500 "' .. ro .. '"')
+  local r = call("make_normal_map", { layer = "Layer 1" })
+  os.execute('chmod 700 "' .. ro .. '"')
+  T.eq(r.ok, false)
+  T.eq(#app.sprites, 1, "no stray unsaved companion tab")
+  T.eq(app.sprite == s, true)
+end)

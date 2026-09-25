@@ -60,3 +60,28 @@ T.test("extension commands: dangerous ones are refused, unknown ones explained",
 end)
 
 F.closeAll()
+
+T.test("builtin_fx puts the artist's active layer and frame back", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  local other = s:newLayer()
+  other.name = "Other"
+  app.layer = other
+  T.eq(call("builtin_fx", { layer = "Body", effect = "invert" }).ok, true)
+  T.eq(app.layer.name, "Other")
+end)
+
+T.test("symmetry turns Aseprite's symmetry toggle on (and off with none)", function()
+  F.closeAll()
+  F.rgbSprite()
+  call("set_tool", { symmetry = "vertical" })
+  T.eq(app.preferences.symmetry_mode.enabled, true)
+  call("set_tool", { symmetry = "none" })
+  T.eq(app.preferences.symmetry_mode.enabled, false)
+end)
+
+T.test("more commands that would break undo or open files are refused", function()
+  for _, id in ipairs{ "Undo", "Redo", "NewFile", "OpenFile", "ReopenClosedFile" } do
+    T.eq(call("run_extension_command", { command = id }).error, "The command '" .. id .. "' can't be run from the chat.")
+  end
+end)

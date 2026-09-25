@@ -56,7 +56,10 @@ function M.set_tool(args)
   if args.symmetry or args.tiled then
     if app.sprite then
       local dp = app.preferences.document(app.sprite)
-      if args.symmetry then dp.symmetry.mode = SYMMETRY[args.symmetry] end
+      if args.symmetry then
+        dp.symmetry.mode = SYMMETRY[args.symmetry]
+        app.preferences.symmetry_mode.enabled = args.symmetry ~= "none"
+      end
       if args.tiled then dp.tiled.mode = TILED[args.tiled] end
     else
       if args.symmetry then skipped[#skipped + 1] = "symmetry (no sprite open)" end

@@ -67,3 +67,27 @@ T.test("script errors name the line, not the file path", function()
   T.eq(r.error:find("Script has a syntax error at line 4", 1, true) ~= nil, true, r.error)
   T.eq(r.error:find(".lua", 1, true), nil, r.error)
 end)
+
+T.test("write_script refuses hidden control characters and won't overwrite without replace", function()
+  T.eq(call("write_script", { name = "Hidden", description = "d", code = "-- tidy\ros.execute('x')" }).ok, false)
+  T.eq(call("write_script", { name = "Keep", description = "first", code = "print('one')" }).ok, true)
+  T.eq(call("write_script", { name = "Keep", description = "second", code = "print('two')" }).error,
+    "A script called 'Keep' already exists. Save it with replace = true to overwrite it.")
+  T.eq(call("write_script", { name = "Keep", description = "second", code = "print('two')", replace = true }).ok, true)
+  T.eq(call("run_script", { name = "Keep" }).data.output, "two")
+end)
+
+T.test("run_script refuses scripts changed since they were approved", function()
+  call("write_script", { name = "Tamper", description = "d", code = "print('safe')" })
+  local path = app.fs.joinPath(scripts.folder(), "Tamper.lua")
+  local f = io.open(path, "a"); f:write("print('sneaky')\n"); f:close()
+  T.eq(call("run_script", { name = "Tamper" }).error,
+    "The script 'Tamper' changed since it was approved (or wasn't saved through the chat). Save it again with write_script so the artist can review the code.")
+end)
+
+T.test("scripts get their own globals", function()
+  call("write_script", { name = "Globals", description = "d", code = "LEAKED_GLOBAL_FROM_SCRIPT = 1\nprint = nil" })
+  T.eq(call("run_script", { name = "Globals" }).ok, true)
+  T.eq(rawget(_G, "LEAKED_GLOBAL_FROM_SCRIPT"), nil)
+  T.eq(type(print), "function")
+end)

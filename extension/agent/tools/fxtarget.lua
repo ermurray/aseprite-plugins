@@ -43,7 +43,14 @@ function M.resolve(args, opts)
   local x1, y1 = math.max(0, r.x), math.max(0, r.y)
   local x2, y2 = math.min(s.width, r.x + r.w), math.min(s.height, r.y + r.h)
   if x2 <= x1 or y2 <= y1 then error("Region is outside the sprite.", 0) end
-  return s, layers, frames, { x = x1, y = y1, w = x2 - x1, h = y2 - y1 }
+  -- A lasso or magic-wand selection isn't a rectangle: only its pixels count.
+  local inside = function() return true end
+  if not args.region and not s.selection.isEmpty then
+    local sel = Selection()
+    sel:add(s.selection)
+    inside = function(x, y) return sel:contains(x, y) end
+  end
+  return s, layers, frames, { x = x1, y = y1, w = x2 - x1, h = y2 - y1, inside = inside }
 end
 
 -- Runs fn(img, origin, frame, layer) on every layer x frame inside ONE transaction; commits changed images.

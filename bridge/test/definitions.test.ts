@@ -87,4 +87,14 @@ describe("tool definitions", () => {
     const cmd = z.object(toolDef("run_extension_command")!.shape);
     expect(cmd.safeParse({ command: "os.exit()" }).success).toBe(false);
   });
+
+  it("script code and descriptions can't hide control characters, and replacing is explicit", () => {
+    const script = z.object(toolDef("write_script")!.shape);
+    expect(script.safeParse({ name: "a", description: "ok", code: "-- tidy\ros.execute('x')" }).success).toBe(false);
+    expect(script.safeParse({ name: "a", description: "bad\rdesc", code: "x" }).success).toBe(false);
+    expect(script.safeParse({ name: "a", description: "ok", code: "local t = 1\n\tprint(t)\n" }).success).toBe(true);
+    for (const n of ["write_script", "run_script", "run_extension_command"]) expect(toolDef(n)!.alwaysAsk).toBe(true);
+    expect(toolDef("write_script")!.summarize!({ name: "a", description: "d", code: "x", replace: true })).toContain("Replace the script");
+    expect(toolDef("run_extension_command")!.summarize!({ command: "Foo" })).toBe('Run the Aseprite command "Foo" (not undoable as one step)');
+  });
 });

@@ -60,7 +60,7 @@ export class Session {
         if (def.kind === "edit") {
           const rejection = this.checkDraftLock(def, args);
           if (rejection) return { ok: false, error: rejection };
-          if (!this.autoApprove) {
+          if (!this.autoApprove || def.alwaysAsk) {
             const approved = await this.askApproval(this.summaryFor(def, args), args.sprite);
             if (stale()) return { ok: false, error: "Chat reset" };
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };

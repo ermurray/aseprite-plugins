@@ -40,6 +40,7 @@ function M.builtin_fx(args)
   local layer = edit.drawableLayer(s, args.layer)
   local frame = sprites.frame(s, args.frame)
   local command, params = build(args)
+  local prevLayer, prevFrame = app.layer, app.frame
   edit.transaction(s, (tostring(args.effect):gsub("_", " ")), function()
     local saved = Selection()
     saved:add(s.selection)
@@ -50,6 +51,10 @@ function M.builtin_fx(args)
     end
     app.command[command](params)
     if args.region then s.selection = saved end
+  end)
+  pcall(function()
+    if prevLayer then app.layer = prevLayer end
+    if prevFrame then app.frame = prevFrame end
   end)
   return { sprite = sprites.name(s), layer = layer.name, frame = frame.frameNumber, effect = args.effect }
 end

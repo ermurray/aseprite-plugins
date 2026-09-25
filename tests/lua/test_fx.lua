@@ -122,3 +122,42 @@ T.test("layer_style overlay, stroke and shadow", function()
 end)
 
 F.closeAll()
+
+T.test("effects follow the exact selection shape, not its bounding box", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  local sel = Selection(Rectangle(0, 1, 1, 1))
+  sel:add(Rectangle(2, 1, 1, 1))
+  s.selection = sel
+  T.eq(call("gradient_fill", { layer = "Body", colors = { "#000000", "#ffffff" } }).ok, true)
+  T.eq(F.px(s, 1, 1, "Body"), 0, "the gap inside the selection bounds stays empty")
+  T.eq(F.px(s, 0, 1, "Body") ~= 0, true)
+end)
+
+T.test("shadow respects the region, and stroke layers stay inside the source's group", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  local sh = call("layer_style", { layer = "Body", style = "shadow", color = "#000000", offsetX = 0, offsetY = 1, region = { x = 0, y = 0, w = 1, h = 1 } })
+  T.eq(sh.ok, true, sh.error)
+  T.eq(F.px(s, 0, 1, "Body shadow") ~= 0, true)
+  T.eq(F.px(s, 1, 1, "Body shadow"), 0, "pixels outside the region cast no shadow")
+  F.closeAll()
+  local s2 = F.rgbSprite()
+  local g = s2:newGroup()
+  g.name = "Char"
+  s2.layers[1].parent = g
+  local st = call("layer_style", { layer = "Body", style = "stroke", color = "#0000ff" })
+  T.eq(st.ok, true, st.error)
+  local stroke
+  for _, l in ipairs(g.layers) do if l.name == "Body stroke" then stroke = l end end
+  T.eq(stroke ~= nil, true, "stroke layer is inside the group")
+end)
+
+T.test("snap_to_palette with a fully transparent palette explains itself", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  local pal = Palette(1)
+  pal:setColor(0, Color{ r = 0, g = 0, b = 0, a = 0 })
+  s:setPalette(pal)
+  T.eq(call("snap_to_palette", { palette = "sprite" }).error, "That palette has no opaque colors to snap to.")
+end)

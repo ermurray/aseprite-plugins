@@ -115,6 +115,17 @@ describe("approval gate", () => {
     expect(c.received.filter((m) => m.type === "tool_call")).toHaveLength(1);
   });
 
+  it("scripts and Aseprite commands always show a card, even with auto-approve on", async () => {
+    const c = await setup(async function* (ctx) {
+      await ctx.tools.call("write_script", { name: "x", description: "d", code: "print(1)" });
+    });
+    c.send({ type: "set_auto_approve", enabled: true });
+    c.send({ type: "user_message", text: "script" });
+    const req = await approveNext(c, true);
+    expect(req).toMatchObject({ summary: expect.stringContaining("print(1)") });
+    await c.waitFor((m) => m.type === "turn_done");
+  });
+
   it("cancel resolves a pending approval as declined", async () => {
     const rec = recorder();
     const c = await setup(async function* (ctx) {

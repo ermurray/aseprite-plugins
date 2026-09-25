@@ -2,7 +2,8 @@ local M = {}
 
 M.DENY = {}
 for _, id in ipairs{ "Exit", "CloseFile", "CloseAllFiles", "SaveFile", "SaveFileAs", "SaveFileCopyAs",
-  "ExportSpriteSheet", "Options", "KeyboardShortcuts", "RunScript", "DeveloperConsole", "OpenScriptFolder", "AgentChat" } do
+  "ExportSpriteSheet", "Options", "KeyboardShortcuts", "RunScript", "DeveloperConsole", "OpenScriptFolder", "AgentChat",
+  "Undo", "Redo", "ReopenClosedFile", "NewFile", "OpenFile", "Launch", "ImportSpriteSheet", "Screenshot" } do
   M.DENY[id] = true
 end
 
