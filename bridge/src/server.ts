@@ -13,6 +13,8 @@ export interface ServerOptions {
   snapshotDir: string;
   toolTimeoutMs?: number;
   stores?: StoreRegistry;
+  /** Called when no window has been connected for `ms` (the bridge then shuts itself down). */
+  idle?: { ms: number; onIdle(): void };
 }
 
 export interface BridgeServer {
@@ -27,7 +29,18 @@ export async function startServer(opts: ServerOptions): Promise<BridgeServer> {
     wss.once("error", reject);
   });
 
+  let idleTimer: NodeJS.Timeout | undefined;
+  const armIdle = () => {
+    if (!opts.idle || wss.clients.size > 0) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (wss.clients.size === 0) opts.idle!.onIdle();
+    }, opts.idle.ms);
+  };
+  armIdle();
+
   wss.on("connection", (ws) => {
+    clearTimeout(idleTimer);
     const session = new Session({
       token: opts.token,
       adapterFactory: opts.adapterFactory,
@@ -43,13 +56,17 @@ export async function startServer(opts: ServerOptions): Promise<BridgeServer> {
     ws.on("message", (data, isBinary) => {
       if (!isBinary) void session.handleRaw(data.toString());
     });
-    ws.on("close", () => session.dispose());
+    ws.on("close", () => {
+      session.dispose();
+      armIdle();
+    });
   });
 
   return {
     port: (wss.address() as AddressInfo).port,
     close: () =>
       new Promise<void>((resolve) => {
+        clearTimeout(idleTimer);
         for (const c of wss.clients) c.terminate();
         wss.close(() => resolve());
       }),

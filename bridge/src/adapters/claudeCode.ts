@@ -11,6 +11,8 @@ type QueryFn = typeof sdkQuery;
 export interface ClaudeCodeOptions {
   snapshotDir: string;
   model?: string;
+  /** The installed Claude Code CLI (the bundled bridge doesn't ship the SDK's own binary). */
+  claudePath?: string;
   queryFn?: QueryFn;
 }
 
@@ -147,7 +149,8 @@ export class ClaudeCodeAdapter implements Adapter {
           abortController: abort,
           resume: this.sessionId,
           model: this.opts.model,
-          env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "aseprite-agent/0.1.0" },
+          pathToClaudeCodeExecutable: this.opts.claudePath,
+          env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "aseprite-agent/0.9.0" },
         },
       });
       for await (const msg of q as AsyncIterable<any>) {

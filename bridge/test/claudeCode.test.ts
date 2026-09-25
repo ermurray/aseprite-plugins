@@ -104,6 +104,13 @@ describe("ClaudeCodeAdapter", () => {
     expect(calls[1].options.systemPrompt).toBe("SP");
   });
 
+  it("passes the discovered claude executable to the SDK", async () => {
+    const calls: any[] = [];
+    const a = new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP" }, { snapshotDir: "/s", claudePath: "/h/.local/bin/claude", queryFn: fakeQuery([], calls) });
+    await collect(a.send("hi"));
+    expect(calls[0].options.pathToClaudeCodeExecutable).toBe("/h/.local/bin/claude");
+  });
+
   it("resumes the SDK session on the next turn", async () => {
     const calls: any[] = [];
     const a = new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP" }, { snapshotDir: "/s", queryFn: fakeQuery([delta("x")], calls) });

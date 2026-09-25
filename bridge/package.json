@@ -1,13 +1,14 @@
 {
   "name": "aseprite-agent-bridge",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "dev": "tsx src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "bundle": "node scripts/bundle.mjs"
   },
   "license": "MIT",
   "type": "module",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
