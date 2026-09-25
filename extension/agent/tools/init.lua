@@ -15,6 +15,7 @@ local extensions = require("agent.tools.extensions")
 local scripts = require("agent.tools.scripts")
 local importer = require("agent.tools.importer")
 local cliptools = require("agent.tools.clips")
+local export = require("agent.tools.export")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -57,6 +58,7 @@ registry.register({
   insert_clip = cliptools.insert_clip,
   delete_clip = cliptools.delete_clip,
   pin_clip = cliptools.pin_clip,
+  export_sprite = export.export_sprite,
 }, "edit")
 
 registry.register({ set_tool = toolstate.set_tool }, "setting")
