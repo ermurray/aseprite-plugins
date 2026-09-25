@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DRAFT_LAYER, NOTES_LAYER } from "./constants.js";
 import { colorRamp } from "./ramp.js";
-import { appendMemory } from "../project.js";
+import { appendMemory, changeBrief, describeBriefChange, type BriefField } from "../project.js";
 import type { ToolResult } from "../toolTypes.js";
 
 export type ToolKind = "read" | "edit";
@@ -334,6 +334,22 @@ export const TOOL_DEFS: ToolDef[] = [
       }
       await appendMemory(env.projectRoot, String(a.note));
       return { ok: true, data: { saved: true } };
+    },
+  },
+  {
+    name: "propose_brief_change",
+    kind: "edit",
+    description:
+      "Change the project's brief (the artist's style guide) when the artist asks for it: set one field (resolution, palette, outline, light) or add a line to the notes. The artist approves it first. Only works inside a project.",
+    shape: { field: z.enum(["resolution", "palette", "outline", "light", "notes"]), value: z.string().min(1).max(300) },
+    activity: () => "Updated the project brief",
+    summarize: (a) => describeBriefChange(a.field as BriefField, String(a.value)),
+    runInBridge: async (a, env) => {
+      if (!env.projectRoot) {
+        return { ok: false, error: 'There is no project yet. The artist can press "Set up project" in the chat window.' };
+      }
+      await changeBrief(env.projectRoot, a.field as BriefField, String(a.value));
+      return { ok: true, data: { updated: a.field } };
     },
   },
 ];

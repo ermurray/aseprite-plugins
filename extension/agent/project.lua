@@ -110,4 +110,57 @@ function M.create(root, brief)
   return dir
 end
 
+function M.savePalette(root, palette)
+  palette:saveAs(app.fs.joinPath(root, M.DIR, "palette.gpl"))
+end
+
+local FIELDS = {
+  { key = "resolution", label = "Sprite size" },
+  { key = "palette", label = "Palette" },
+  { key = "outline", label = "Outline style" },
+  { key = "light", label = "Light direction" },
+}
+
+local function unset(v)
+  return (v == nil or v == "(not set)") and "" or v
+end
+
+-- The brief's template fields. handEdited is true when the file has anything beyond the
+-- template, so the settings dialog must not overwrite it.
+function M.readBrief(root)
+  local f = io.open(app.fs.joinPath(root, M.DIR, "brief.md"), "r")
+  local text = f and f:read("a") or ""
+  if f then f:close() end
+  local b = {}
+  for _, fd in ipairs(FIELDS) do
+    b[fd.key] = unset(text:match("\n%- " .. fd.label:gsub("%s", "%%s") .. ": ([^\n]*)"))
+  end
+  b.notes = unset((text:match("## Notes%s*\n(.*)$") or ""):match("^%s*(.-)%s*$"))
+  -- Multi-line notes count too: the dialog's single-line Notes field would flatten them.
+  b.handEdited = b.notes:find("\n") ~= nil or M.briefMarkdown(b):match("^(.-)%s*$") ~= text:match("^(.-)%s*$")
+  return b
+end
+
+function M.writeBrief(root, b)
+  write(app.fs.joinPath(root, M.DIR, "brief.md"), M.briefMarkdown(b))
+end
+
+-- Shell command that opens a file or folder with the system's default app.
+function M.openCommand(path, osName)
+  if osName == "Windows" then return 'start "" "' .. path .. '"' end
+  return (osName == "Darwin" and "open" or "xdg-open") .. ' "' .. path .. '"'
+end
+
+function M.osName()
+  if app.fs.pathSeparator == "\\" then return "Windows" end
+  local p = io.popen("uname")
+  local name = p and p:read("l") or "Linux"
+  if p then p:close() end
+  return name
+end
+
+function M.clearMemory(root)
+  write(app.fs.joinPath(root, M.DIR, "memory.md"), MEMORY)
+end
+
 return M

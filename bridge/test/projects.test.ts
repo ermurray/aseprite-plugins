@@ -306,4 +306,20 @@ describe("projects", () => {
     c.send({ type: "approval", approvalId: req.approvalId, approved: false });
     await c.waitFor((m) => m.type === "turn_done");
   });
+
+  it("propose_brief_change asks for approval and edits brief.md", async () => {
+    const root = await makeProject("# Project brief\n\n- Light direction: top-left\n");
+    await setup({
+      toolCalls: async (tools) => {
+        await tools.call("propose_brief_change", { field: "light", value: "from the right" });
+      },
+    });
+    const { c } = await hello({ projectRoot: root });
+    c.send({ type: "user_message", text: "light is from the right now" });
+    const req = (await c.waitFor((m) => m.type === "approval_request")) as any;
+    expect(req.summary).toBe('Update the brief: Light direction -> "from the right"');
+    c.send({ type: "approval", approvalId: req.approvalId, approved: true });
+    await c.waitFor((m) => m.type === "turn_done");
+    expect(await readFile(join(root, ".artproject", "brief.md"), "utf8")).toContain("- Light direction: from the right");
+  });
 });

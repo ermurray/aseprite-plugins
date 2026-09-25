@@ -8,7 +8,7 @@ describe("tool definitions", () => {
     expect(new Set(names).size).toBe(names.length);
     expect(names.sort()).toEqual([
       "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "create_draft_layer", "frame_ops", "get_palette",
-      "get_pixels", "get_snapshot", "get_sprite_info", "layer_ops", "list_open_sprites", "list_project_sprites", "propose_memory", "replace_color",
+      "get_pixels", "get_snapshot", "get_sprite_info", "layer_ops", "list_open_sprites", "list_project_sprites", "propose_brief_change", "propose_memory", "replace_color",
       "set_palette", "set_pixels", "transform",
     ]);
   });

@@ -7,6 +7,8 @@ local project = require("agent.project")
 local prefs = require("agent.prefs")
 local context = require("agent.context")
 local sprites = require("agent.tools.sprites")
+local palettes = require("agent.palettes")
+local edit = require("agent.tools.edit")
 
 local ChatWindow = {}
 ChatWindow.__index = ChatWindow
@@ -91,7 +93,13 @@ function ChatWindow:build()
     onclose = function() self:onClosed() end,
   }
   dlg:label{ id = "project", text = "No project" }
-  dlg:button{ id = "makeproject", text = "Set up project", onclick = function() self:setupProject() end }
+  dlg:button{
+    id = "makeproject",
+    text = "Set up project",
+    onclick = function()
+      if self.projectRoot then self:projectSettings() else self:setupProject() end
+    end,
+  }
   dlg:button{ id = "history", text = "History", onclick = function() self.conn:send{ type = "list_history" } end }
   dlg:newrow()
   dlg:label{ id = "status", text = STATUS_TEXT.disconnected }
@@ -199,7 +207,7 @@ end
 function ChatWindow:syncProjectHeader()
   if not self.open then return end
   self.dlg:modify{ id = "project", text = self.projectRoot and ("Project: " .. self.projectName) or "No project" }
-  self.dlg:modify{ id = "makeproject", visible = self.projectRoot == nil }
+  self.dlg:modify{ id = "makeproject", text = self.projectRoot and "Project settings" or "Set up project" }
 end
 
 -- Hotkey behaviour: hide if open, show if hidden. Hiding keeps the chat, the bridge
@@ -465,18 +473,103 @@ function ChatWindow:setupProject()
   d:entry{ id = "outline", label = "Outline style", text = "" }
   d:entry{ id = "light", label = "Light direction", text = "" }
   d:entry{ id = "notes", label = "Notes", text = "" }
+  local palLabels, palEntries = self:paletteChoices(s)
+  d:combobox{ id = "palette", label = "Palette", options = palLabels, option = palLabels[1] }
+  d:check{ id = "applypalette", text = "Apply the palette to this sprite", selected = false }
   d:check{ id = "adopt", text = "Bring this chat into the project", selected = hasChat, visible = hasChat }
   d:button{ id = "ok", text = "Create project", focus = true }
   d:button{ id = "cancel", text = "Cancel" }
   d:show()
   if not d.data.ok then return end
-  local ok, err = pcall(project.create, d.data.root, d.data)
+  local entry = palEntries[d.data.palette]
+  local pal = entry and palettes.load(entry, s)
+  local brief = {
+    resolution = d.data.resolution,
+    palette = entry and palettes.describe(entry, pal, s) or "",
+    outline = d.data.outline,
+    light = d.data.light,
+    notes = d.data.notes,
+  }
+  local ok, err = pcall(project.create, d.data.root, brief)
   if not ok then
     self.model:addLocalError("Couldn't set up the project.", tostring(err))
     self:repaint()
     return
   end
+  if pal then
+    project.savePalette(d.data.root, pal)
+    if d.data.applypalette then self:applyPalette(s, pal) end
+  end
   self:finishSetup(project.findRoot(s.filename), hasChat and d.data.adopt)
+end
+
+-- Palette dropdown entries: labels in order, plus label -> entry.
+function ChatWindow:paletteChoices(sprite, extra)
+  local labels, byLabel = {}, {}
+  local list = palettes.list(sprite)
+  if extra then table.insert(list, 1, extra) end
+  for _, e in ipairs(list) do
+    labels[#labels + 1] = e.label
+    byLabel[e.label] = e
+  end
+  return labels, byLabel
+end
+
+function ChatWindow:applyPalette(sprite, pal)
+  local ok, err = pcall(edit.transaction, sprite, "apply project palette", function() sprite:setPalette(pal) end)
+  if not ok then self.model:addLocalError("Couldn't apply the palette.", tostring(err)) end
+end
+
+function ChatWindow:projectSettings()
+  local root = self.projectRoot
+  if not root then return end
+  local b = project.readBrief(root)
+  local s = app.sprite
+  local labels, byLabel = self:paletteChoices(s, { label = "Keep the project palette", keep = true })
+  local d = Dialog{ title = "Project settings - " .. self.projectName }
+  if b.handEdited then d:label{ text = "brief.md was edited by hand; use Open brief.md to change it." } end
+  local editable = not b.handEdited
+  d:entry{ id = "resolution", label = "Sprite size", text = b.resolution, visible = editable }
+  d:entry{ id = "outline", label = "Outline style", text = b.outline, visible = editable }
+  d:entry{ id = "light", label = "Light direction", text = b.light, visible = editable }
+  d:entry{ id = "notes", label = "Notes", text = b.notes, visible = editable }
+  d:combobox{ id = "palette", label = "Palette", options = labels, option = labels[1] }
+  d:check{ id = "applypalette", text = "Apply the palette to this sprite", selected = false, visible = s ~= nil }
+  d:separator()
+  local function open(path) os.execute(project.openCommand(path, project.osName())) end
+  d:button{ text = "Open project folder", onclick = function() open(root) end }
+  d:button{ text = "Open brief.md", onclick = function() open(app.fs.joinPath(root, project.DIR, "brief.md")) end }
+  d:button{
+    text = "Clear memory...",
+    onclick = function()
+      local answer = app.alert{ title = "Clear project memory", text = "Remove every note Claude saved in memory.md?", buttons = { "Clear", "Cancel" } }
+      if answer == 1 then project.clearMemory(root) end
+    end,
+  }
+  d:newrow()
+  d:button{ id = "ok", text = "Save", focus = true }
+  d:button{ id = "cancel", text = "Cancel" }
+  d:show()
+  if not d.data.ok then return end
+
+  local entry = byLabel[d.data.palette]
+  if entry and not entry.keep then
+    local pal = palettes.load(entry, s)
+    local palettePath = app.fs.joinPath(root, project.DIR, "palette.gpl")
+    if pal then
+      project.savePalette(root, pal)
+      if s and d.data.applypalette then self:applyPalette(s, pal) end
+    elseif app.fs.isFile(palettePath) then
+      os.remove(palettePath)
+    end
+    b.palette = palettes.describe(entry, pal, s)
+  end
+  if editable then
+    b.resolution, b.outline, b.light, b.notes = d.data.resolution, d.data.outline, d.data.light, d.data.notes
+    project.writeBrief(root, b)
+  end
+  self.model:addNotice("Project settings saved.")
+  self:repaint()
 end
 
 -- After the project folder exists: switch to it, optionally bringing the current chat along.
