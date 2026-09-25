@@ -13,6 +13,7 @@ local builtin = require("agent.tools.builtin")
 local toolstate = require("agent.tools.toolstate")
 local extensions = require("agent.tools.extensions")
 local scripts = require("agent.tools.scripts")
+local importer = require("agent.tools.importer")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -49,6 +50,7 @@ registry.register({
   run_extension_command = extensions.run_extension_command,
   write_script = scripts.write_script,
   run_script = scripts.run_script,
+  import_from_sprite = importer.import_from_sprite,
 }, "edit")
 
 registry.register({ set_tool = toolstate.set_tool }, "setting")
