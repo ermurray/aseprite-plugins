@@ -11,7 +11,10 @@ esac
 DEST="$EXT_DIR/aseprite-agent"
 mkdir -p "$EXT_DIR"
 [ -L "$DEST" ] && rm "$DEST"
-rsync -a --delete "$ROOT/extension/" "$DEST/"
+rsync -a --delete --exclude bridge "$ROOT/extension/" "$DEST/"
+(cd "$ROOT/bridge" && npm run --silent bundle >/dev/null)
+mkdir -p "$DEST/bridge"
+cp "$ROOT/bridge/dist/bridge.mjs" "$DEST/bridge/bridge.mjs"
 echo "Copied $ROOT/extension -> $DEST"
 echo "Restart Aseprite to load it. If 'Agent Chat' still does not appear under Edit, use the fallback:"
 echo "  (cd extension && zip -r ../aseprite-agent.aseprite-extension .) and open that file with Aseprite."

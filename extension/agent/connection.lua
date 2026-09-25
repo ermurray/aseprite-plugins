@@ -1,7 +1,9 @@
+local launcher = require("agent.launcher")
+
 local Connection = {}
 Connection.__index = Connection
 
-local VERSION = "0.1.0"
+local VERSION = "0.9.0"
 
 function Connection.infoPath()
   local home = os.getenv("ASEPRITE_AGENT_HOME")
@@ -44,12 +46,22 @@ end
 
 function Connection:connect()
   self:close()
-  local info = Connection.readBridgeInfo(Connection.infoPath())
+  local path = Connection.infoPath()
+  local info = Connection.readBridgeInfo(path)
   if not info then
-    self:setStatus("disconnected", "Bridge not running")
+    self:setStatus("disconnected", "Assistant not running")
+    if self.opts.onNeedsBridge then self.opts.onNeedsBridge("missing") end
+    return false
+  end
+  if info.pid and not launcher.isBridgePid(info.pid) then
+    os.remove(path)
+    self:setStatus("disconnected", "Assistant not running")
+    if self.opts.onNeedsBridge then self.opts.onNeedsBridge("stale") end
     return false
   end
   self.token = info.token
+  self.port = info.port
+  self.opened = false
   self:setStatus("connecting")
   local ws
   ws = WebSocket{
@@ -74,6 +86,7 @@ end
 
 function Connection:onReceive(kind, data, err)
   if kind == WebSocketMessageType.OPEN then
+    self.opened = true
     -- Re-read the token on every (re)connect: a restarted bridge has a new one.
     local info = Connection.readBridgeInfo(Connection.infoPath())
     if info then self.token = info.token end
@@ -91,6 +104,14 @@ function Connection:onReceive(kind, data, err)
       if msg.type == "ready" then self:setStatus("connected") end
       self.opts.onMessage(msg)
     end
+  elseif (kind == WebSocketMessageType.CLOSE or (WebSocketMessageType.ERROR ~= nil and kind == WebSocketMessageType.ERROR))
+    and self.opened == false then
+    -- Never reached the bridge: whatever bridge.json points at is gone. Stop dialing it and start fresh.
+    local info = Connection.readBridgeInfo(Connection.infoPath())
+    if info and self.port and math.tointeger(info.port) == math.tointeger(self.port) then os.remove(Connection.infoPath()) end
+    self:close()
+    self:setStatus("disconnected", err)
+    if self.opts.onNeedsBridge then self.opts.onNeedsBridge("unreachable") end
   elseif kind == WebSocketMessageType.CLOSE then
     self:setStatus("disconnected", err)
   elseif WebSocketMessageType.ERROR ~= nil and kind == WebSocketMessageType.ERROR then
