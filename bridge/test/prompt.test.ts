@@ -4,7 +4,7 @@ import { TOOL_DEFS } from "../src/tools/definitions.js";
 
 describe("system prompt", () => {
   it("mentions the rules Claude must follow for edits", () => {
-    for (const phrase of ["approval", "Apply", "AI Draft", "create_draft_layer", "Allow AI drafts", "[AI drafts: on]", "reference", "annotate", "one undo"]) {
+    for (const phrase of ["approval", "Apply", "AI Draft", "create_draft_layer", "Allow AI drafts", "AI drafts: off", "reference", "annotate", "one undo"]) {
       expect(SYSTEM_PROMPT).toContain(phrase);
     }
   });

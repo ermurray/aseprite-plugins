@@ -2,6 +2,7 @@ local sprites = require("agent.tools.sprites")
 local color = require("agent.tools.color")
 local inspect = require("agent.tools.inspect")
 local edit = require("agent.tools.edit")
+local project = require("agent.project")
 
 local M = { NEAR = 24, TOP = 16 }
 
@@ -67,6 +68,16 @@ function M.list_open_sprites()
     }
   end
   return { tabs = tabs }
+end
+
+function M.list_project_sprites()
+  local root = sprites.projectRoot
+  if not root then error("No project is open. The artist can set one up with Set up project in the chat window.", 0) end
+  local open = {}
+  for _, s in ipairs(app.sprites) do open[sprites.name(s)] = true end
+  local list = {}
+  for _, rel in ipairs(project.listSprites(root)) do list[#list + 1] = { path = rel, open = open[rel] == true } end
+  return { project = app.fs.fileName(root), sprites = list }
 end
 
 return M

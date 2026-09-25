@@ -95,6 +95,15 @@ describe("ClaudeCodeAdapter", () => {
     expect(Object.keys(o.mcpServers)).toEqual(["aseprite"]);
   });
 
+  it("uses the per-turn system prompt when given", async () => {
+    const calls: any[] = [];
+    const a = new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP" }, { snapshotDir: "/s", queryFn: fakeQuery([], calls) });
+    await collect(a.send("hi", { systemPrompt: "PROJECT SP" }));
+    await collect(a.send("again"));
+    expect(calls[0].options.systemPrompt).toBe("PROJECT SP");
+    expect(calls[1].options.systemPrompt).toBe("SP");
+  });
+
   it("resumes the SDK session on the next turn", async () => {
     const calls: any[] = [];
     const a = new ClaudeCodeAdapter({ tools: noTools, systemPrompt: "SP" }, { snapshotDir: "/s", queryFn: fakeQuery([delta("x")], calls) });

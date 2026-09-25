@@ -1,13 +1,16 @@
-local M = {}
+local project = require("agent.project")
 
-function M.name(sprite)
-  return app.fs.fileName(sprite.filename)
-end
+local M = { projectRoot = nil }
+
 
 function M.openList()
   local names = {}
   for _, s in ipairs(app.sprites) do names[#names + 1] = M.name(s) end
   return #names > 0 and table.concat(names, ", ") or "(none)"
+end
+
+function M.name(sprite)
+  return project.relative(M.projectRoot, sprite.filename) or app.fs.fileName(sprite.filename)
 end
 
 function M.resolve(ref)
@@ -19,7 +22,38 @@ function M.resolve(ref)
   for _, s in ipairs(app.sprites) do
     if s.filename == ref or M.name(s) == ref then return s end
   end
+  -- A bare file name matches an open sprite elsewhere only if the project has no file at that exact path.
+  local exactFile = M.projectRoot and app.fs.isFile(project.absolute(M.projectRoot, ref))
+  if not exactFile then
+    for _, s in ipairs(app.sprites) do
+      if app.fs.fileName(s.filename) == ref then return s end
+    end
+  end
   error("Sprite '" .. ref .. "' is not open. Open sprites: " .. M.openList(), 0)
+end
+
+-- An unopened project sprite named by `ref` is opened for the duration of a tool call:
+-- in the background (and closed afterwards) for reads, as a tab (left open) for edits.
+function M.openIfNeeded(ref, mode)
+  if type(ref) ~= "string" or ref == "" or not M.projectRoot then return nil end
+  if pcall(M.resolve, ref) then return nil end
+  local abs = project.absolute(M.projectRoot, ref)
+  if not app.fs.isFile(abs) or not project.relative(M.projectRoot, abs) then return nil end
+  local prev = app.sprite
+  if mode == "edit" then
+    local opened = app.open(abs)
+    if not opened then error("Couldn't open " .. ref .. ".", 0) end
+    if prev then app.sprite = prev end
+    return { openedAsTab = M.name(opened) }
+  end
+  local bg = Sprite{ fromFile = abs }
+  if prev then app.sprite = prev end
+  return {
+    close = function()
+      bg:close()
+      if prev then pcall(function() app.sprite = prev end) end
+    end,
+  }
 end
 
 function M.frame(sprite, n)

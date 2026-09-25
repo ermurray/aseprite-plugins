@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { AdapterFactory } from "./adapters/Adapter.js";
-import type { ConversationStore } from "./conversations.js";
+import type { StoreRegistry } from "./stores.js";
 import { Session } from "./session.js";
 
 export interface ServerOptions {
@@ -12,7 +12,7 @@ export interface ServerOptions {
   systemPrompt: string;
   snapshotDir: string;
   toolTimeoutMs?: number;
-  store?: ConversationStore;
+  stores?: StoreRegistry;
 }
 
 export interface BridgeServer {
@@ -34,7 +34,7 @@ export async function startServer(opts: ServerOptions): Promise<BridgeServer> {
       systemPrompt: opts.systemPrompt,
       snapshotDir: opts.snapshotDir,
       toolTimeoutMs: opts.toolTimeoutMs,
-      store: opts.store,
+      stores: opts.stores,
       send: (m) => {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
       },

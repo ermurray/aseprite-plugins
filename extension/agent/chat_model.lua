@@ -142,6 +142,20 @@ function ChatModel:loadHistory(items, opts)
   for _, item in ipairs(keep) do self.items[#self.items + 1] = item end
 end
 
+function ChatModel:showSetupHint(text)
+  for _, it in ipairs(self.items) do
+    if it.kind == "setup" then return end
+  end
+  self.items[#self.items + 1] = { kind = "setup", text = text, localOnly = true }
+  self.streaming = false
+end
+
+function ChatModel:clearSetupHint()
+  for i = #self.items, 1, -1 do
+    if self.items[i].kind == "setup" then table.remove(self.items, i) end
+  end
+end
+
 function ChatModel:clear()
   self.items = {}
   self.streaming = false

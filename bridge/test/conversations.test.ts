@@ -19,6 +19,33 @@ describe("ConversationStore", () => {
     expect(await readdir(dir)).toEqual([`${c.id}.json`]);
   });
 
+  it("lists conversations newest first and skips unreadable files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "chats-"));
+    const store = new ConversationStore(dir);
+    const a = store.create();
+    a.title = "first";
+    await store.save(a);
+    await new Promise((r) => setTimeout(r, 5));
+    const b = store.create();
+    b.title = "second";
+    await store.save(b);
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(dir, "junk.json"), "{nope");
+    const list = await store.list();
+    expect(list.map((c) => c.title)).toEqual(["second", "first"]);
+    expect(list[0]).toEqual({ id: b.id, title: "second", updatedAt: expect.any(String) });
+    expect(await new ConversationStore(join(dir, "missing")).list()).toEqual([]);
+  });
+
+  it("removes a conversation file, and ignores missing ones", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    const c = store.create();
+    await store.save(c);
+    await store.remove(c.id);
+    expect(await store.load(c.id)).toBeUndefined();
+    await store.remove("never-existed");
+  });
+
   it("returns undefined for unknown or unsafe ids", async () => {
     const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
     expect(await store.load("nope")).toBeUndefined();

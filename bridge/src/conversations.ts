@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResumeState } from "./adapters/Adapter.js";
 
@@ -25,7 +25,7 @@ export class ConversationStore {
   /** Saves in flight per conversation; saves run one at a time and loads wait for them. */
   private pending = new Map<string, Promise<void>>();
 
-  constructor(private dir: string) {}
+  constructor(readonly dir: string) {}
 
   create(): Conversation {
     const now = new Date().toISOString();
@@ -41,6 +41,27 @@ export class ConversationStore {
     } catch {
       return undefined;
     }
+  }
+
+  async list(): Promise<{ id: string; title: string; updatedAt: string }[]> {
+    let names: string[];
+    try {
+      names = (await readdir(this.dir)).filter((n) => n.endsWith(".json"));
+    } catch {
+      return [];
+    }
+    const out: { id: string; title: string; updatedAt: string }[] = [];
+    for (const name of names) {
+      const c = await this.load(name.slice(0, -5));
+      if (c) out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt });
+    }
+    return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async remove(id: string): Promise<void> {
+    if (!SAFE_ID.test(id)) return;
+    await this.pending.get(id)?.catch(() => {});
+    await rm(join(this.dir, `${id}.json`), { force: true });
   }
 
   /** Snapshots `c` now and writes it after any earlier save of the same conversation. */

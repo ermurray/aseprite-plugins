@@ -78,7 +78,7 @@ function R.displayText(s, keepMarkdown)
 end
 
 local LABELS = { user = "You" }
-local PREFIX = { activity = "- ", error = "! " }
+local PREFIX = { activity = "- ", error = "! ", setup = "Tip: " }
 
 -- Normalized text per item, recomputed only when the item's text changes: layout runs on
 -- every paint (8x a second while Claude works) and saved chats can be long.

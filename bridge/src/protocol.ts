@@ -1,6 +1,16 @@
 import { z } from "zod";
 import type { HistoryItem } from "./conversations.js";
 
+const Rect = z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() });
+const Context = z.object({
+  activeSprite: z.string().optional(),
+  frame: z.number().optional(),
+  frameCount: z.number().optional(),
+  layer: z.string().optional(),
+  selection: Rect.optional(),
+  openSprites: z.array(z.string()).optional(),
+});
+
 export const PROTOCOL_VERSION = 1;
 
 const Hello = z.object({
@@ -8,8 +18,18 @@ const Hello = z.object({
   token: z.string(),
   extensionVersion: z.string(),
   conversationId: z.string().optional(),
+  projectRoot: z.string().nullable().optional(),
 });
-const UserMessage = z.object({ type: z.literal("user_message"), text: z.string().min(1) });
+const UserMessage = z.object({ type: z.literal("user_message"), text: z.string().min(1), context: Context.optional(), attach: z.boolean().optional() });
+const OpenProject = z.object({
+  type: z.literal("open_project"),
+  projectRoot: z.string().nullable().optional(),
+  conversationId: z.string().optional(),
+  adoptConversationId: z.string().optional(),
+});
+const ListHistory = z.object({ type: z.literal("list_history") });
+const OpenConversation = z.object({ type: z.literal("open_conversation"), conversationId: z.string() });
+
 const Cancel = z.object({ type: z.literal("cancel") });
 const NewChat = z.object({ type: z.literal("new_chat") });
 const ToolResultMsg = z.object({
@@ -24,12 +44,13 @@ const Approval = z.object({ type: z.literal("approval"), approvalId: z.string(),
 const SetAutoApprove = z.object({ type: z.literal("set_auto_approve"), enabled: z.boolean() });
 const SetDraftMode = z.object({ type: z.literal("set_draft_mode"), enabled: z.boolean() });
 
-export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove, SetDraftMode]);
+export const ExtensionMessage = z.discriminatedUnion("type", [Hello, UserMessage, Cancel, NewChat, ToolResultMsg, Approval, SetAutoApprove, SetDraftMode, OpenProject, ListHistory, OpenConversation]);
 export type ExtensionMessage = z.infer<typeof ExtensionMessage>;
 
 export type BridgeMessage =
-  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string; conversationId: string; history: HistoryItem[] }
-  | { type: "conversation"; conversationId: string; history: HistoryItem[] }
+  | { type: "ready"; adapter: string; protocolVersion: number; snapshotDir: string; projectRoot: string | null; projectName: string; conversationId: string; history: HistoryItem[] }
+  | { type: "conversation"; conversationId: string; projectRoot: string | null; projectName: string; history: HistoryItem[] }
+  | { type: "history_list"; items: { id: string; title: string; updatedAt: string }[] }
   | { type: "text_delta"; text: string }
   | { type: "notice"; text: string }
   | { type: "tool_activity"; summary: string }

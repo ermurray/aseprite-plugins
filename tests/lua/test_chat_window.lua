@@ -39,3 +39,145 @@ T.test("hidden-window tip after a cancelled turn stays quiet", function()
   T.eq(tips[1], "Agent replied - open Agent Chat to read it")
   ChatWindow.showTip = realTip
 end)
+
+local F = require("fixtures")
+local project = require("agent.project")
+local sprites = require("agent.tools.sprites")
+local prefs = require("agent.prefs")
+
+local root = app.fs.joinPath(F.tmp, "window proj " .. os.time())
+app.fs.makeAllDirectories(root)
+project.create(root, {})
+
+T.test("switching to a sprite in another project asks the bridge for that project's chat", function()
+  F.closeAll()
+  local p = {}
+  prefs.setConversation(p, root, "proj-chat")
+  local w = stubbed(p)
+  w.conn.status = "connected"
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(root, "a.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  T.eq(sprites.projectRoot, root)
+  T.deepEq(w.sent[#w.sent], { type = "open_project", projectRoot = root, conversationId = "proj-chat" })
+  local before = #w.sent
+  w:onSiteChange()
+  T.eq(#w.sent, before, "same project: nothing sent")
+  sprites.projectRoot = nil
+end)
+
+T.test("an unsaved sprite keeps the current project", function()
+  F.closeAll()
+  local w = stubbed({})
+  w:setProject(root)
+  app.sprite = Sprite(2, 2)
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("ready and conversation messages remember the chat per project", function()
+  local p = {}
+  local w = stubbed(p)
+  w:onMessage{ type = "conversation", conversationId = "c9", projectRoot = root, projectName = "x", history = json.decode("[]") }
+  T.eq(prefs.getConversation(p, root), "c9")
+  w.projectRoot = root
+  w:newChat()
+  T.eq(prefs.getConversation(p, root), nil)
+end)
+
+T.test("sending a message attaches the context and the attach flag, then clears the flag", function()
+  F.closeAll()
+  local w = stubbed({})
+  w.conn.status = "connected"
+  w.attachNext = true
+  w.dlg = { data = { input = "what do you think?" }, modify = function() end, repaint = function() end }
+  app.sprite = Sprite(2, 2)
+  w:onSendOrStop()
+  local msg = w.sent[#w.sent]
+  T.eq(msg.type, "user_message")
+  T.eq(msg.attach, true)
+  T.eq(type(msg.context.openSprites), "table")
+  T.eq(w.attachNext, false)
+end)
+
+T.test("a saved sprite outside any project shows the setup hint once; a project clears it", function()
+  F.closeAll()
+  local w = stubbed({})
+  local outside = app.fs.joinPath(F.tmp, "loose " .. os.time())
+  app.fs.makeAllDirectories(outside)
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(outside, "loose.aseprite"))
+  app.sprite = s
+  w:maybeShowSetupHint()
+  w:maybeShowSetupHint()
+  local hints = 0
+  for _, it in ipairs(w.model.items) do if it.kind == "setup" then hints = hints + 1 end end
+  T.eq(hints, 1)
+  w:setProject(root)
+  for _, it in ipairs(w.model.items) do T.eq(it.kind ~= "setup", true) end
+  sprites.projectRoot = nil
+end)
+
+T.test("finishSetup switches to the new project and brings the current chat along", function()
+  local p = {}
+  prefs.setConversation(p, nil, "loose-chat")
+  local w = stubbed(p)
+  w.conn.status = "connected"
+  w.model:addUser("earlier")
+  w:finishSetup(root, true)
+  T.eq(w.projectRoot, root)
+  T.deepEq(w.sent[#w.sent], { type = "open_project", projectRoot = root, adoptConversationId = "loose-chat" })
+  T.eq(w.model.items[#w.model.items].kind, "notice")
+  w:finishSetup(root, false)
+  T.eq(w.sent[#w.sent].adoptConversationId, nil)
+  sprites.projectRoot = nil
+end)
+
+T.test("while Claude is busy, a tab switch waits for the bridge before tools change project", function()
+  F.closeAll()
+  local w = stubbed({})
+  w.conn.status = "connected"
+  w.busy = true
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(root, "busy.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  T.eq(w.sent[#w.sent].type, "open_project")
+  T.eq(sprites.projectRoot, nil, "tools keep resolving against the old project")
+  w:onMessage{ type = "conversation", conversationId = "c1", projectRoot = root, projectName = "p", history = json.decode("[]") }
+  T.eq(sprites.projectRoot, root)
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("reference tabs outside the project don't switch the chat away", function()
+  F.closeAll()
+  local w = stubbed({})
+  w:setProject(root)
+  local elsewhere = app.fs.joinPath(F.tmp, "refs " .. os.time())
+  app.fs.makeAllDirectories(elsewhere)
+  local ref = Sprite(2, 2)
+  ref:saveAs(app.fs.joinPath(elsewhere, "ref.png"))
+  app.sprite = ref
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("the setup hint survives the bridge's conversation reply", function()
+  F.closeAll()
+  local w = stubbed({})
+  local loose = app.fs.joinPath(F.tmp, "loose2 " .. os.time())
+  app.fs.makeAllDirectories(loose)
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(loose, "l.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  w:onMessage{ type = "conversation", conversationId = "g", projectName = "No project", history = json.decode("[]") }
+  local hint = false
+  for _, it in ipairs(w.model.items) do if it.kind == "setup" then hint = true end end
+  T.eq(hint, true)
+end)

@@ -50,7 +50,7 @@ describe("bridge server", () => {
   it("replies ready with adapter name and snapshot dir", async () => {
     const s = await start(noop);
     const c = await authed(s.port);
-    expect(c.received[0]).toEqual({ type: "ready", adapter: "fake", protocolVersion: 1, snapshotDir: "/tmp/snaps", conversationId: expect.any(String), history: [] });
+    expect(c.received[0]).toEqual({ type: "ready", adapter: "fake", protocolVersion: 1, snapshotDir: "/tmp/snaps", projectRoot: null, projectName: "No project", conversationId: expect.any(String), history: [] });
   });
 
   it("reports malformed messages without closing", async () => {
@@ -155,7 +155,7 @@ describe("new chat during a running turn", () => {
     await new Promise((r) => setTimeout(r, 50));
     const after = c.received.slice(before);
     expect(after).toEqual([
-      { type: "conversation", conversationId: expect.any(String), history: [] },
+      { type: "conversation", conversationId: expect.any(String), projectRoot: null, projectName: "No project", history: [] },
       { type: "text_delta", text: "fresh:two" },
       { type: "turn_done" },
     ]);

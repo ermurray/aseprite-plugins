@@ -37,12 +37,17 @@ T.test("events from a replaced socket are ignored", function()
   T.eq(c.status, "disconnected")
 end)
 
-T.test("hello carries the conversation to resume", function()
+T.test("hello carries the project and the conversation to resume", function()
   local sent = {}
-  local c = Connection.new{ onMessage = function() end, onStatus = function() end, conversationId = function() return "conv-1" end }
+  local c = Connection.new{
+    onMessage = function() end,
+    onStatus = function() end,
+    helloFields = function() return { projectRoot = "/art/game", conversationId = "conv-1" } end,
+  }
   c.token = "tok"
   c.send = function(_, msg) sent[#sent + 1] = msg end
   c:onReceive(WebSocketMessageType.OPEN, "", nil)
   T.eq(sent[1].type, "hello")
+  T.eq(sent[1].projectRoot, "/art/game")
   T.eq(sent[1].conversationId, "conv-1")
 end)

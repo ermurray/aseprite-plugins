@@ -95,18 +95,18 @@ export class ClaudeCodeAdapter implements Adapter {
     });
   }
 
-  async *send(text: string): AsyncIterable<AdapterEvent> {
+  async *send(text: string, opts?: { systemPrompt?: string }): AsyncIterable<AdapterEvent> {
     // A saved session can vanish (Claude Code cleans old ones up). Only when the SDK says so,
     // and before Claude said or did anything, start a fresh session seeded with a recap.
     const summary = this.resuming ? this.ctx.resumeSummary : undefined;
     this.resuming = false;
     if (summary === undefined) {
-      yield* this.attempt(text);
+      yield* this.attempt(text, opts);
       return;
     }
     const held: AdapterEvent[] = [];
     let sessionMissing = false;
-    for await (const ev of this.attempt(text)) {
+    for await (const ev of this.attempt(text, opts)) {
       if (ev.type === "error" && !this.saidAnything) {
         held.push(ev);
         if (/no conversation found/i.test(ev.message)) sessionMissing = true;
@@ -121,7 +121,7 @@ export class ClaudeCodeAdapter implements Adapter {
     }
     this.sessionId = undefined;
     yield { type: "error", message: "Couldn't resume Claude's earlier session.", hint: "Continuing with a recap of this chat." };
-    yield* this.attempt(text.startsWith("/") ? text : `${summary}\n\n${text}`);
+    yield* this.attempt(text.startsWith("/") ? text : `${summary}\n\n${text}`, opts);
   }
 
   /** Called when Claude uses a tool: from then on a retry could repeat an edit. */
@@ -129,7 +129,7 @@ export class ClaudeCodeAdapter implements Adapter {
     this.saidAnything = true;
   }
 
-  private async *attempt(text: string): AsyncIterable<AdapterEvent> {
+  private async *attempt(text: string, opts?: { systemPrompt?: string }): AsyncIterable<AdapterEvent> {
     this.saidAnything = false;
     const abort = new AbortController();
     this.abort = abort;
@@ -138,7 +138,7 @@ export class ClaudeCodeAdapter implements Adapter {
       const q = (this.opts.queryFn ?? sdkQuery)({
         prompt: text,
         options: {
-          systemPrompt: this.ctx.systemPrompt,
+          systemPrompt: opts?.systemPrompt ?? this.ctx.systemPrompt,
           tools: [],
           allowedTools: TOOL_DEFS.map((d) => `mcp__${MCP_SERVER_NAME}__${d.name}`),
           mcpServers: { [MCP_SERVER_NAME]: this.mcpServer() },
