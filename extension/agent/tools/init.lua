@@ -7,6 +7,7 @@ local frames = require("agent.tools.frames")
 local annotate = require("agent.tools.annotate")
 local transform = require("agent.tools.transform")
 local analyze = require("agent.tools.analyze")
+local fx = require("agent.tools.fx")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -28,6 +29,12 @@ registry.register({
   frame_ops = frames.frame_ops,
   annotate = annotate.annotate,
   transform = transform.transform,
+  dither = fx.dither,
+  gradient_fill = fx.gradient_fill,
+  pixel_perfect = fx.pixel_perfect,
+  snap_to_palette = fx.snap_to_palette,
+  selout = fx.selout,
+  layer_style = fx.layer_style,
 }, "edit")
 
 return registry
