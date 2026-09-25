@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Chats belong to a project folder. A project is a folder containing `.artproject/`, which holds the brief, memory, chats and settings. Claude sees the project's brief and memory, knows exactly which sprite you're on, can read any sprite in the project (opening it in the background if needed), can open unopened sprites to edit them, and can propose memory notes. A History list reopens older chats.
+**Goal:** Chats belong to a project folder, and anyone not yet in a project is guided to set one up (Task 7). A project is a folder containing `.artproject/`, which holds the brief, memory, chats and settings. Claude sees the project's brief and memory, knows exactly which sprite you're on, can read any sprite in the project (opening it in the background if needed), can open unopened sprites to edit them, and can propose memory notes. A History list reopens older chats.
 
 **Architecture:**
 - **Extension:** discovers the project root by walking up from the active sprite's folder, and follows tab changes (`sitechange`). It tells the bridge the current project (`hello`, `open_project`) and attaches a context stamp to every message.
@@ -1689,6 +1689,275 @@ Rebuild and restart the bridge, restart Aseprite, then:
 7. Switch projects while Claude is mid-reply. The reply finishes first, then the chat switches.
 8. **History**: after a New chat, open History, pick the older chat and press Open. It loads.
 9. Tick **Attach view** and ask "how does this look?". Claude looks at a snapshot first. The checkbox clears after sending.
+
+---
+
+### Task 7: Guided project setup
+
+The artist asked that anyone not yet in a project be helped to set one up, so that everything works. This covers unsaved sprites and moves the current chat into the new project.
+
+**Files:**
+- Modify: `bridge/src/conversations.ts` (add `remove`), `bridge/src/protocol.ts` (`open_project.adoptConversationId`), `bridge/src/session.ts`, `bridge/src/project.ts` (no-project prompt wording), `extension/agent/chat_model.lua`, `extension/agent/chat_render.lua`, `extension/agent/chat_window.lua`
+- Test: `bridge/test/conversations.test.ts`, `bridge/test/projects.test.ts`, `bridge/test/project.test.ts`, `tests/lua/test_chat_model.lua`, `tests/lua/test_chat_window.lua`
+
+**Interfaces:**
+- `ConversationStore.remove(id): Promise<void>` (waits for pending saves; missing files are fine)
+- `open_project{projectRoot, conversationId?, adoptConversationId?}`. When `adoptConversationId` equals the session's current conversation and the root is a real project, the conversation is saved into the new project's store and removed from the old one. Then that same id is opened.
+- `ChatModel:showSetupHint(text)` / `ChatModel:clearSetupHint()`. A setup hint is a local-only item of kind `"setup"`, and at most one exists at a time.
+- `ChatWindow:maybeShowSetupHint()`, `ChatWindow:setupProject()` (the dialog flow), `ChatWindow:finishSetup(root, adopt)` (the testable part that runs after the dialog)
+- The **Make project** button is renamed **Set up project** (`id = "makeproject"` is kept).
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `bridge/test/conversations.test.ts` (in the `ConversationStore` describe):
+```ts
+  it("removes a conversation file, and ignores missing ones", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    const c = store.create();
+    await store.save(c);
+    await store.remove(c.id);
+    expect(await store.load(c.id)).toBeUndefined();
+    await store.remove("never-existed");
+  });
+```
+
+Add to `bridge/test/projects.test.ts`:
+```ts
+  it("setting up a project can bring the current chat into it", async () => {
+    await setup();
+    const { c, ready } = await hello();
+    await turn(c, { text: "before the project existed" });
+    const root = await makeProject();
+    c.send({ type: "open_project", projectRoot: root, adoptConversationId: ready.conversationId });
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv.conversationId).toBe(ready.conversationId);
+    expect(conv.projectRoot).toBe(root);
+    expect(conv.history[0]).toEqual({ kind: "user", text: "before the project existed" });
+    expect(await readdir(join(root, ".artproject", "chats"))).toEqual([`${ready.conversationId}.json`]);
+    c.send({ type: "list_history" });
+    await c.waitFor((m) => m.type === "history_list");
+    c.send({ type: "open_project", projectRoot: null });
+    await c.waitFor((m) => m.type === "conversation" && (m as any).projectRoot === null);
+    c.send({ type: "list_history" });
+    const globalList = (await c.waitFor((m) => m.type === "history_list" && (m as any).items.length === 0)) as any;
+    expect(globalList.items).toEqual([]);
+  });
+
+  it("ignores adopt requests for another conversation or a non-project folder", async () => {
+    await setup();
+    const { c, ready } = await hello();
+    await turn(c, { text: "stay" });
+    const plain = await mkdtemp(join(tmpdir(), "plain-"));
+    c.send({ type: "open_project", projectRoot: plain, adoptConversationId: ready.conversationId });
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv.projectRoot).toBeNull();
+    expect(await readdir(plain)).toEqual([]);
+  });
+```
+
+Add to `bridge/test/project.test.ts`, inside the prompt test:
+```ts
+    expect(buildSystemPrompt("BASE", undefined)).toContain("Set up project");
+```
+
+Add to `tests/lua/test_chat_model.lua`:
+```lua
+T.test("the setup hint is a single local item that can be cleared", function()
+  local m = ChatModel.new()
+  m:addUser("hi")
+  m:showSetupHint("Set it up")
+  m:showSetupHint("Set it up")
+  T.eq(#m.items, 2)
+  T.eq(m.items[2].kind, "setup")
+  T.eq(m.items[2].localOnly, true)
+  m:clearSetupHint()
+  T.eq(#m.items, 1)
+end)
+```
+
+Add to `tests/lua/test_chat_window.lua`:
+```lua
+T.test("a saved sprite outside any project shows the setup hint once; a project clears it", function()
+  F.closeAll()
+  local w = stubbed({})
+  local outside = app.fs.joinPath(F.tmp, "loose " .. os.time())
+  app.fs.makeAllDirectories(outside)
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(outside, "loose.aseprite"))
+  app.sprite = s
+  w:maybeShowSetupHint()
+  w:maybeShowSetupHint()
+  local hints = 0
+  for _, it in ipairs(w.model.items) do if it.kind == "setup" then hints = hints + 1 end end
+  T.eq(hints, 1)
+  w:setProject(root)
+  for _, it in ipairs(w.model.items) do T.eq(it.kind ~= "setup", true) end
+  sprites.projectRoot = nil
+end)
+
+T.test("finishSetup switches to the new project and brings the current chat along", function()
+  local p = {}
+  prefs.setConversation(p, nil, "loose-chat")
+  local w = stubbed(p)
+  w.conn.status = "connected"
+  w.model:addUser("earlier")
+  w:finishSetup(root, true)
+  T.eq(w.projectRoot, root)
+  T.deepEq(w.sent[#w.sent], { type = "open_project", projectRoot = root, adoptConversationId = "loose-chat" })
+  T.eq(w.model.items[#w.model.items].kind, "notice")
+  w:finishSetup(root, false)
+  T.eq(w.sent[#w.sent].adoptConversationId, nil)
+  sprites.projectRoot = nil
+end)
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `cd bridge && npx vitest run` and `scripts/test-lua.sh`
+Expected: the new tests fail (`remove` is not a function, adopt is ignored, `showSetupHint` is nil, and so on).
+
+- [ ] **Step 3: Implement the bridge**
+
+`conversations.ts`, in `ConversationStore`:
+```ts
+  async remove(id: string): Promise<void> {
+    if (!SAFE_ID.test(id)) return;
+    await this.pending.get(id)?.catch(() => {});
+    await rm(join(this.dir, `${id}.json`), { force: true });
+  }
+```
+(add `rm` to the `node:fs/promises` import).
+
+`protocol.ts`: `OpenProject` gets `adoptConversationId: z.string().optional()`.
+
+`session.ts`, in the `open_project` case, before the busy check:
+```ts
+        if (msg.adoptConversationId && root && msg.adoptConversationId === this.conv.id && !this.busy) {
+          const from = this.store();
+          const to = this.deps.stores?.get(root);
+          if (to && from !== to) {
+            await to.save(this.conv);
+            await from?.remove(this.conv.id);
+          }
+          await this.openProject(root, this.conv.id);
+          this.deps.send(this.conversationMessage());
+          return;
+        }
+```
+
+`project.ts`: in `buildSystemPrompt`, replace the no-project text with:
+```ts
+    return `${base}\n\nThere is no project open. Projects keep a brief, shared memory and chat history, and let you read every sprite in the folder. When it becomes relevant (the artist wants you to remember something, compare sprites, or follow a style guide), mention once that they can press "Set up project" in the chat window. Don't repeat it every message.`;
+```
+Also, in `definitions.ts`, change the `propose_memory` no-project error, and the Lua `list_project_sprites` error, to say `press "Set up project" in the chat window` instead of `Make project`. Update the matching test expectations: the propose_memory test expects `"Set up project"`, and `test_open_sprites.lua` expects `No project is open. The artist can set one up with Set up project in the chat window.`
+
+- [ ] **Step 4: Implement the model and render changes**
+
+`chat_model.lua`:
+```lua
+function ChatModel:showSetupHint(text)
+  for _, it in ipairs(self.items) do
+    if it.kind == "setup" then return end
+  end
+  self.items[#self.items + 1] = { kind = "setup", text = text, localOnly = true }
+  self.streaming = false
+end
+
+function ChatModel:clearSetupHint()
+  for i = #self.items, 1, -1 do
+    if self.items[i].kind == "setup" then table.remove(self.items, i) end
+  end
+end
+```
+`chat_render.lua`: add `setup = "Tip: "` to `PREFIX`. `chat_window.lua` `COLORS`: add `setup = Color{ r = 240, g = 180, b = 80 }`.
+
+- [ ] **Step 5: Implement the window changes**
+
+In `chat_window.lua`:
+- Rename the button: `dlg:button{ id = "makeproject", text = "Set up project", onclick = function() self:setupProject() end }`.
+- Add:
+```lua
+local SETUP_HINT = "This sprite isn't part of a project yet. A project keeps your brief, shared memory and chat history, and lets Claude see every sprite in the folder. Press Set up project to create one."
+
+function ChatWindow:maybeShowSetupHint()
+  if self.projectRoot then
+    self.model:clearSetupHint()
+  elseif app.sprite then
+    self.model:showSetupHint(SETUP_HINT)
+  end
+  self:repaint()
+end
+```
+- In `setProject`, after setting `sprites.projectRoot`, call `self:maybeShowSetupHint()`.
+- In `show()`, after `syncProjectHeader()`, call `self:maybeShowSetupHint()`.
+- Replace `makeProject` with:
+```lua
+function ChatWindow:setupProject()
+  local s = app.sprite
+  if not s then
+    ChatWindow.showTip("Open or create a sprite first: the project is made around its folder")
+    return
+  end
+  if app.fs.filePath(s.filename) == "" then
+    ChatWindow.showTip("Save the sprite first: choose where your project will live")
+    app.command.SaveFileAs()
+    if app.fs.filePath(s.filename) == "" then return end
+  end
+  local folders = project.ancestors(s.filename, 5)
+  local hasChat = #self.model.items > 0
+  local d = Dialog{ title = "Set up project" }
+  d:label{ text = "Everything in this folder becomes one project. Answers are optional; you can edit brief.md any time." }
+  d:combobox{ id = "root", label = "Project folder", options = folders, option = folders[1] }
+  d:entry{ id = "resolution", label = "Sprite size", text = "" }
+  d:entry{ id = "palette", label = "Palette", text = "" }
+  d:entry{ id = "outline", label = "Outline style", text = "" }
+  d:entry{ id = "light", label = "Light direction", text = "" }
+  d:entry{ id = "notes", label = "Notes", text = "" }
+  d:check{ id = "adopt", text = "Bring this chat into the project", selected = hasChat, visible = hasChat }
+  d:button{ id = "ok", text = "Create project", focus = true }
+  d:button{ id = "cancel", text = "Cancel" }
+  d:show()
+  if not d.data.ok then return end
+  local ok, err = pcall(project.create, d.data.root, d.data)
+  if not ok then
+    self.model:addLocalError("Couldn't set up the project.", tostring(err))
+    self:repaint()
+    return
+  end
+  self:finishSetup(project.findRoot(s.filename), hasChat and d.data.adopt)
+end
+
+-- After the project folder exists: switch to it, optionally bringing the current chat along.
+function ChatWindow:finishSetup(root, adopt)
+  local adoptId = adopt and prefs.getConversation(self.opts.prefs, nil) or nil
+  self.projectRoot = root
+  sprites.projectRoot = root
+  self.projectName = root and app.fs.fileName(root) or "No project"
+  self:syncProjectHeader()
+  self.model:clearSetupHint()
+  if self.conn.status == "connected" then
+    self.conn:send{ type = "open_project", projectRoot = root, adoptConversationId = adoptId }
+  end
+  self.model:addNotice("Project " .. self.projectName .. " is ready. Its brief is in .artproject/brief.md; edit it any time.")
+  self:repaint()
+end
+```
+- Remove the old `makeProject` method. The stub test from Task 6 that referenced it doesn't call it, so no test change is needed.
+
+- [ ] **Step 6: Run the tests, install, and commit**
+
+Run: `cd bridge && npx vitest run && npm run typecheck` and `scripts/test-lua.sh`, plus the headless load check. Expected: all pass.
+```bash
+scripts/dev-install.sh
+git add bridge extension tests
+git commit -m "feat: guided project setup (hint, save-first, bring the current chat along)"
+```
+
+- [ ] **Step 7: Manual checklist additions**
+1. Open a saved sprite outside any project and open the chat. An amber "Tip:" line explains projects, and the header shows **Set up project**.
+2. Chat a little, then press **Set up project** with "Bring this chat into the project" ticked. The chat stays, the header shows the project, a notice says where the brief lives, and the chat file now sits in `<folder>/.artproject/chats/`.
+3. Create a **new, unsaved** sprite and press **Set up project**. Aseprite's Save As opens first, and after saving, the setup dialog follows.
+4. With no project, ask Claude to "remember that my palette is 16 colors". It suggests setting up a project (once) instead of failing silently.
 
 ---
 
