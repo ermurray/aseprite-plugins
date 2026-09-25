@@ -3,6 +3,10 @@ local render = require("agent.chat_render")
 local Connection = require("agent.connection")
 local tools = require("agent.tools")
 local inspect = require("agent.tools.inspect")
+local project = require("agent.project")
+local prefs = require("agent.prefs")
+local context = require("agent.context")
+local sprites = require("agent.tools.sprites")
 
 local ChatWindow = {}
 ChatWindow.__index = ChatWindow
@@ -47,6 +51,9 @@ function ChatWindow.new(opts)
     lineH = 14,
     open = false,
     autoApprove = false,
+    projectRoot = nil,
+    projectName = "No project",
+    attachNext = false,
     tick = 0,
   }, ChatWindow)
   self.unlockTimer = Timer{
@@ -67,8 +74,12 @@ function ChatWindow.new(opts)
   self.conn = Connection.new{
     onMessage = function(m) self:onMessage(m) end,
     onStatus = function(s, d) self:onStatus(s, d) end,
-    conversationId = function() return self.opts.prefs.conversationId end,
+    helloFields = function()
+      return { projectRoot = self.projectRoot, conversationId = prefs.getConversation(self.opts.prefs, self.projectRoot) }
+    end,
   }
+  self:setProject(project.findRoot(app.sprite and app.sprite.filename), true)
+  self.siteListener = app.events:on("sitechange", function() self:onSiteChange() end)
   return self
 end
 
@@ -78,6 +89,10 @@ function ChatWindow:build()
     resizeable = true,
     onclose = function() self:onClosed() end,
   }
+  dlg:label{ id = "project", text = "No project" }
+  dlg:button{ id = "makeproject", text = "Make project", onclick = function() self:makeProject() end }
+  dlg:button{ id = "history", text = "History", onclick = function() self.conn:send{ type = "list_history" } end }
+  dlg:newrow()
   dlg:label{ id = "status", text = STATUS_TEXT.disconnected }
   dlg:newrow()
   dlg:button{ id = "connect", text = "Reconnect", onclick = function() self.conn:connect() end }
@@ -113,6 +128,8 @@ function ChatWindow:build()
     end,
   }
   dlg:newrow()
+  dlg:check{ id = "attach", text = "Attach view", selected = self.attachNext, onclick = function() self.attachNext = self.dlg.data.attach end }
+  dlg:newrow()
   dlg:entry{ id = "input", hexpand = true }
   dlg:button{ id = "send", text = "Send", focus = true, onclick = function() self:onSendOrStop() end }
   self.dlg = dlg
@@ -132,8 +149,33 @@ function ChatWindow:show()
     end
     self.dlg:modify{ id = "status", text = STATUS_TEXT[self.conn.status] or self.conn.status }
     self:syncButtons()
+    self:syncProjectHeader()
   end
   if self.conn.status == "disconnected" then self.conn:connect() end
+end
+
+function ChatWindow:setProject(root, silent)
+  self.projectRoot = root
+  sprites.projectRoot = root
+  self.projectName = root and app.fs.fileName(root) or "No project"
+  self:syncProjectHeader()
+  if not silent and self.conn.status == "connected" then
+    self.conn:send{ type = "open_project", projectRoot = root, conversationId = prefs.getConversation(self.opts.prefs, root) }
+  end
+end
+
+-- Follow the artist's tabs: a saved sprite decides the project; unsaved sprites keep it.
+function ChatWindow:onSiteChange()
+  local s = app.sprite
+  if not s or app.fs.filePath(s.filename) == "" then return end
+  local root = project.findRoot(s.filename)
+  if root ~= self.projectRoot then self:setProject(root) end
+end
+
+function ChatWindow:syncProjectHeader()
+  if not self.open then return end
+  self.dlg:modify{ id = "project", text = self.projectRoot and ("Project: " .. self.projectName) or "No project" }
+  self.dlg:modify{ id = "makeproject", visible = self.projectRoot == nil }
 end
 
 -- Hotkey behaviour: hide if open, show if hidden. Hiding keeps the chat, the bridge
@@ -151,6 +193,7 @@ function ChatWindow:close()
   self.timer:stop()
   self.unlockTimer:stop()
   self.conn:close()
+  pcall(function() app.events:off(self.siteListener) end)
   if self.open then self.dlg:close() end
 end
 
@@ -222,7 +265,9 @@ function ChatWindow:onSendOrStop()
   self.cancelRequested = false
   self.followTail = true
   self.dlg:modify{ id = "input", text = "" }
-  self.conn:send{ type = "user_message", text = text }
+  self.conn:send{ type = "user_message", text = text, context = context.build(self.projectRoot), attach = self.attachNext or nil }
+  self.attachNext = false
+  if self.open then self.dlg:modify{ id = "attach", selected = false } end
   self:setBusy(true)
   self:repaint()
 end
@@ -232,7 +277,7 @@ function ChatWindow:newChat()
   self.conn:send{ type = "new_chat" }
   -- Forget the old conversation locally too: if this New chat never reached the bridge
   -- (disconnected), reconnecting must not bring the old chat back.
-  self.opts.prefs.conversationId = nil
+  prefs.setConversation(self.opts.prefs, self.projectRoot, nil)
   self.model:clear()
   self:syncButtons()
   self.scroll = 0
@@ -258,8 +303,11 @@ function ChatWindow:onMessage(m)
     if tip then ChatWindow.showTip(tip) end
   end
   if m.type == "ready" or m.type == "conversation" then
-    -- The bridge's saved conversation is the source of truth after (re)connecting or New chat.
-    self.opts.prefs.conversationId = m.conversationId
+    prefs.setConversation(self.opts.prefs, m.projectRoot, m.conversationId)
+    if m.projectName then
+      self.projectName = m.projectName
+      self:syncProjectHeader()
+    end
     if m.history then self.model:loadHistory(m.history, { dropLocal = m.type == "conversation" }) end
     self.followTail = true
     self:syncButtons()
@@ -269,6 +317,8 @@ function ChatWindow:onMessage(m)
     self.agentLabel = (m.adapter == "claude-code") and "Claude" or tostring(m.adapter)
     self.conn:send{ type = "set_auto_approve", enabled = self.autoApprove }
     self.conn:send{ type = "set_draft_mode", enabled = self.opts.prefs.allowDrafts == true }
+  elseif m.type == "history_list" then
+    self:showHistory(m.items)
   elseif m.type == "approval_request" then
     self.model:addApproval(m.approvalId, m.summary)
     self:syncButtons()
@@ -346,6 +396,53 @@ function ChatWindow:paintSpinner(gc, cx, cy)
     gc.color = Color{ r = 120, g = 200, b = 140, a = math.max(40, 255 - age * 40) }
     gc:fillRect(Rectangle(cx + p[1], cy + p[2], 2, 2))
   end
+end
+
+function ChatWindow:showHistory(items)
+  if #items == 0 then
+    ChatWindow.showTip("No saved chats in " .. self.projectName .. " yet")
+    return
+  end
+  local labels, ids = {}, {}
+  for i = 1, #items do
+    local it = items[i]
+    local label = tostring(it.updatedAt):sub(1, 16):gsub("T", " ") .. "  " .. render.displayText(tostring(it.title))
+    labels[#labels + 1] = label
+    ids[label] = tostring(it.id)
+  end
+  local d = Dialog{ title = "Chats in " .. self.projectName }
+  d:combobox{ id = "chat", options = labels, option = labels[1] }
+  d:button{ id = "open", text = "Open", focus = true }
+  d:button{ id = "cancel", text = "Cancel" }
+  d:show()
+  if d.data.open then self.conn:send{ type = "open_conversation", conversationId = ids[d.data.chat] } end
+end
+
+function ChatWindow:makeProject()
+  local s = app.sprite
+  if not s or app.fs.filePath(s.filename) == "" then
+    ChatWindow.showTip("Save the sprite first: the project is made from its folder")
+    return
+  end
+  local folders = project.ancestors(s.filename, 5)
+  local d = Dialog{ title = "Make project" }
+  d:combobox{ id = "root", label = "Project folder", options = folders, option = folders[1] }
+  d:entry{ id = "resolution", label = "Sprite size", text = "" }
+  d:entry{ id = "palette", label = "Palette", text = "" }
+  d:entry{ id = "outline", label = "Outline style", text = "" }
+  d:entry{ id = "light", label = "Light direction", text = "" }
+  d:entry{ id = "notes", label = "Notes", text = "" }
+  d:button{ id = "ok", text = "Create", focus = true }
+  d:button{ id = "cancel", text = "Cancel" }
+  d:show()
+  if not d.data.ok then return end
+  local ok, err = pcall(project.create, d.data.root, d.data)
+  if not ok then
+    self.model:addLocalError("Couldn't make the project.", tostring(err))
+    self:repaint()
+    return
+  end
+  self:setProject(project.findRoot(s.filename))
 end
 
 return ChatWindow

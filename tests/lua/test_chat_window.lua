@@ -39,3 +39,66 @@ T.test("hidden-window tip after a cancelled turn stays quiet", function()
   T.eq(tips[1], "Agent replied - open Agent Chat to read it")
   ChatWindow.showTip = realTip
 end)
+
+local F = require("fixtures")
+local project = require("agent.project")
+local sprites = require("agent.tools.sprites")
+local prefs = require("agent.prefs")
+
+local root = app.fs.joinPath(F.tmp, "window proj " .. os.time())
+app.fs.makeAllDirectories(root)
+project.create(root, {})
+
+T.test("switching to a sprite in another project asks the bridge for that project's chat", function()
+  F.closeAll()
+  local p = {}
+  prefs.setConversation(p, root, "proj-chat")
+  local w = stubbed(p)
+  w.conn.status = "connected"
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(root, "a.aseprite"))
+  app.sprite = s
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  T.eq(sprites.projectRoot, root)
+  T.deepEq(w.sent[#w.sent], { type = "open_project", projectRoot = root, conversationId = "proj-chat" })
+  local before = #w.sent
+  w:onSiteChange()
+  T.eq(#w.sent, before, "same project: nothing sent")
+  sprites.projectRoot = nil
+end)
+
+T.test("an unsaved sprite keeps the current project", function()
+  F.closeAll()
+  local w = stubbed({})
+  w:setProject(root)
+  app.sprite = Sprite(2, 2)
+  w:onSiteChange()
+  T.eq(w.projectRoot, root)
+  sprites.projectRoot = nil
+end)
+
+T.test("ready and conversation messages remember the chat per project", function()
+  local p = {}
+  local w = stubbed(p)
+  w:onMessage{ type = "conversation", conversationId = "c9", projectRoot = root, projectName = "x", history = json.decode("[]") }
+  T.eq(prefs.getConversation(p, root), "c9")
+  w.projectRoot = root
+  w:newChat()
+  T.eq(prefs.getConversation(p, root), nil)
+end)
+
+T.test("sending a message attaches the context and the attach flag, then clears the flag", function()
+  F.closeAll()
+  local w = stubbed({})
+  w.conn.status = "connected"
+  w.attachNext = true
+  w.dlg = { data = { input = "what do you think?" }, modify = function() end, repaint = function() end }
+  app.sprite = Sprite(2, 2)
+  w:onSendOrStop()
+  local msg = w.sent[#w.sent]
+  T.eq(msg.type, "user_message")
+  T.eq(msg.attach, true)
+  T.eq(type(msg.context.openSprites), "table")
+  T.eq(w.attachNext, false)
+end)
