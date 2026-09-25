@@ -23,6 +23,7 @@ local COLORS = {
   activity = Color{ r = 140, g = 140, b = 140 },
   thinking = Color{ r = 140, g = 140, b = 140 },
   notice = Color{ r = 140, g = 140, b = 140 },
+  setup = Color{ r = 240, g = 180, b = 80 },
   approval_label = Color{ r = 240, g = 180, b = 80 },
   approval_state = Color{ r = 140, g = 140, b = 140 },
   error = Color{ r = 230, g = 90, b = 80 },
@@ -90,7 +91,7 @@ function ChatWindow:build()
     onclose = function() self:onClosed() end,
   }
   dlg:label{ id = "project", text = "No project" }
-  dlg:button{ id = "makeproject", text = "Make project", onclick = function() self:makeProject() end }
+  dlg:button{ id = "makeproject", text = "Set up project", onclick = function() self:setupProject() end }
   dlg:button{ id = "history", text = "History", onclick = function() self.conn:send{ type = "list_history" } end }
   dlg:newrow()
   dlg:label{ id = "status", text = STATUS_TEXT.disconnected }
@@ -150,6 +151,7 @@ function ChatWindow:show()
     self.dlg:modify{ id = "status", text = STATUS_TEXT[self.conn.status] or self.conn.status }
     self:syncButtons()
     self:syncProjectHeader()
+    self:maybeShowSetupHint()
   end
   if self.conn.status == "disconnected" then self.conn:connect() end
 end
@@ -159,9 +161,21 @@ function ChatWindow:setProject(root, silent)
   sprites.projectRoot = root
   self.projectName = root and app.fs.fileName(root) or "No project"
   self:syncProjectHeader()
+  self:maybeShowSetupHint()
   if not silent and self.conn.status == "connected" then
     self.conn:send{ type = "open_project", projectRoot = root, conversationId = prefs.getConversation(self.opts.prefs, root) }
   end
+end
+
+local SETUP_HINT = "This sprite isn't part of a project yet. A project keeps your brief, shared memory and chat history, and lets Claude see every sprite in the folder. Press Set up project to create one."
+
+function ChatWindow:maybeShowSetupHint()
+  if self.projectRoot then
+    self.model:clearSetupHint()
+  elseif app.sprite then
+    self.model:showSetupHint(SETUP_HINT)
+  end
+  self:repaint()
 end
 
 -- Follow the artist's tabs: a saved sprite decides the project; unsaved sprites keep it.
@@ -418,31 +432,54 @@ function ChatWindow:showHistory(items)
   if d.data.open then self.conn:send{ type = "open_conversation", conversationId = ids[d.data.chat] } end
 end
 
-function ChatWindow:makeProject()
+function ChatWindow:setupProject()
   local s = app.sprite
-  if not s or app.fs.filePath(s.filename) == "" then
-    ChatWindow.showTip("Save the sprite first: the project is made from its folder")
+  if not s then
+    ChatWindow.showTip("Open or create a sprite first: the project is made around its folder")
     return
   end
+  if app.fs.filePath(s.filename) == "" then
+    ChatWindow.showTip("Save the sprite first: choose where your project will live")
+    app.command.SaveFileAs()
+    if app.fs.filePath(s.filename) == "" then return end
+  end
   local folders = project.ancestors(s.filename, 5)
-  local d = Dialog{ title = "Make project" }
+  local hasChat = #self.model.items > 0
+  local d = Dialog{ title = "Set up project" }
+  d:label{ text = "Everything in this folder becomes one project. Answers are optional; you can edit brief.md any time." }
   d:combobox{ id = "root", label = "Project folder", options = folders, option = folders[1] }
   d:entry{ id = "resolution", label = "Sprite size", text = "" }
   d:entry{ id = "palette", label = "Palette", text = "" }
   d:entry{ id = "outline", label = "Outline style", text = "" }
   d:entry{ id = "light", label = "Light direction", text = "" }
   d:entry{ id = "notes", label = "Notes", text = "" }
-  d:button{ id = "ok", text = "Create", focus = true }
+  d:check{ id = "adopt", text = "Bring this chat into the project", selected = hasChat, visible = hasChat }
+  d:button{ id = "ok", text = "Create project", focus = true }
   d:button{ id = "cancel", text = "Cancel" }
   d:show()
   if not d.data.ok then return end
   local ok, err = pcall(project.create, d.data.root, d.data)
   if not ok then
-    self.model:addLocalError("Couldn't make the project.", tostring(err))
+    self.model:addLocalError("Couldn't set up the project.", tostring(err))
     self:repaint()
     return
   end
-  self:setProject(project.findRoot(s.filename))
+  self:finishSetup(project.findRoot(s.filename), hasChat and d.data.adopt)
+end
+
+-- After the project folder exists: switch to it, optionally bringing the current chat along.
+function ChatWindow:finishSetup(root, adopt)
+  local adoptId = adopt and prefs.getConversation(self.opts.prefs, nil) or nil
+  self.projectRoot = root
+  sprites.projectRoot = root
+  self.projectName = root and app.fs.fileName(root) or "No project"
+  self:syncProjectHeader()
+  self.model:clearSetupHint()
+  if self.conn.status == "connected" then
+    self.conn:send{ type = "open_project", projectRoot = root, adoptConversationId = adoptId }
+  end
+  self.model:addNotice("Project " .. self.projectName .. " is ready. Its brief is in .artproject/brief.md; edit it any time.")
+  self:repaint()
 end
 
 return ChatWindow

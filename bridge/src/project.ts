@@ -44,7 +44,7 @@ export async function appendMemory(root: string, note: string): Promise<void> {
 
 export function buildSystemPrompt(base: string, project?: { name: string; notes: ProjectNotes }): string {
   if (!project) {
-    return `${base}\n\nThere is no project open. The artist can create one with "Make project" in the chat window; projects keep a brief, shared memory and chat history.`;
+    return `${base}\n\nThere is no project open. Projects keep a brief, shared memory and chat history, and let you read every sprite in the folder. When it becomes relevant (the artist wants you to remember something, compare sprites, or follow a style guide), mention once that they can press "Set up project" in the chat window. Don't repeat it every message.`;
   }
   const parts = [base, `Project: ${project.name}. Sprite paths in messages and tools are relative to the project folder.`];
   parts.push(project.notes.brief ? `Project brief (written by the artist; follow it):\n${project.notes.brief}` : "The project has no brief yet.");

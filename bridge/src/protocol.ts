@@ -21,7 +21,12 @@ const Hello = z.object({
   projectRoot: z.string().nullable().optional(),
 });
 const UserMessage = z.object({ type: z.literal("user_message"), text: z.string().min(1), context: Context.optional(), attach: z.boolean().optional() });
-const OpenProject = z.object({ type: z.literal("open_project"), projectRoot: z.string().nullable().optional(), conversationId: z.string().optional() });
+const OpenProject = z.object({
+  type: z.literal("open_project"),
+  projectRoot: z.string().nullable().optional(),
+  conversationId: z.string().optional(),
+  adoptConversationId: z.string().optional(),
+});
 const ListHistory = z.object({ type: z.literal("list_history") });
 const OpenConversation = z.object({ type: z.literal("open_conversation"), conversationId: z.string() });
 

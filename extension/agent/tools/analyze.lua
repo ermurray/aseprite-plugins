@@ -72,7 +72,7 @@ end
 
 function M.list_project_sprites()
   local root = sprites.projectRoot
-  if not root then error("No project is open. The artist can create one with Make project in the chat window.", 0) end
+  if not root then error("No project is open. The artist can set one up with Set up project in the chat window.", 0) end
   local open = {}
   for _, s in ipairs(app.sprites) do open[sprites.name(s)] = true end
   local list = {}

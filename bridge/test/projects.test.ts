@@ -185,7 +185,7 @@ describe("projects", () => {
     const { c } = await hello();
     c.send({ type: "set_auto_approve", enabled: true });
     await turn(c, { text: "remember" });
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Make project") });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Set up project") });
   });
 
   it("edit cards say when the sprite will be opened as a tab", async () => {
@@ -200,5 +200,35 @@ describe("projects", () => {
     expect(req.summary).toBe('Add layer "A" to chars/knight.aseprite (opens it as a tab)');
     c.send({ type: "approval", approvalId: req.approvalId, approved: false });
     await c.waitFor((m) => m.type === "turn_done");
+  });
+  it("setting up a project can bring the current chat into it", async () => {
+    await setup();
+    const { c, ready } = await hello();
+    await turn(c, { text: "before the project existed" });
+    const root = await makeProject();
+    c.send({ type: "open_project", projectRoot: root, adoptConversationId: ready.conversationId });
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv.conversationId).toBe(ready.conversationId);
+    expect(conv.projectRoot).toBe(root);
+    expect(conv.history[0]).toEqual({ kind: "user", text: "before the project existed" });
+    expect(await readdir(join(root, ".artproject", "chats"))).toEqual([`${ready.conversationId}.json`]);
+    c.send({ type: "list_history" });
+    await c.waitFor((m) => m.type === "history_list");
+    c.send({ type: "open_project", projectRoot: null });
+    await c.waitFor((m) => m.type === "conversation" && (m as any).projectRoot === null);
+    c.send({ type: "list_history" });
+    const globalList = (await c.waitFor((m) => m.type === "history_list" && (m as any).items.length === 0)) as any;
+    expect(globalList.items).toEqual([]);
+  });
+
+  it("ignores adopt requests for another conversation or a non-project folder", async () => {
+    await setup();
+    const { c, ready } = await hello();
+    await turn(c, { text: "stay" });
+    const plain = await mkdtemp(join(tmpdir(), "plain-"));
+    c.send({ type: "open_project", projectRoot: plain, adoptConversationId: ready.conversationId });
+    const conv = (await c.waitFor((m) => m.type === "conversation")) as any;
+    expect(conv.projectRoot).toBeNull();
+    expect(await readdir(plain)).toEqual([]);
   });
 });

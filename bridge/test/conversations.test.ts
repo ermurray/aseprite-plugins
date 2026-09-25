@@ -37,6 +37,15 @@ describe("ConversationStore", () => {
     expect(await new ConversationStore(join(dir, "missing")).list()).toEqual([]);
   });
 
+  it("removes a conversation file, and ignores missing ones", async () => {
+    const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
+    const c = store.create();
+    await store.save(c);
+    await store.remove(c.id);
+    expect(await store.load(c.id)).toBeUndefined();
+    await store.remove("never-existed");
+  });
+
   it("returns undefined for unknown or unsafe ids", async () => {
     const store = new ConversationStore(await mkdtemp(join(tmpdir(), "chats-")));
     expect(await store.load("nope")).toBeUndefined();

@@ -74,7 +74,7 @@ T.test("list_project_sprites lists project files and which are open", function()
     { path = "chars/slime.aseprite", open = false },
   })
   sprites.projectRoot = nil
-  T.eq(call("list_project_sprites").error, "No project is open. The artist can create one with Make project in the chat window.")
+  T.eq(call("list_project_sprites").error, "No project is open. The artist can set one up with Set up project in the chat window.")
 end)
 
 sprites.projectRoot = nil

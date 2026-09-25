@@ -140,6 +140,17 @@ export class Session {
         return;
       case "open_project": {
         const root = await this.validRoot(msg.projectRoot);
+        if (msg.adoptConversationId && root && msg.adoptConversationId === this.conv.id && !this.busy) {
+          const from = this.store();
+          const to = this.deps.stores?.get(root);
+          if (to && from !== to) {
+            await to.save(this.conv);
+            await from?.remove(this.conv.id);
+          }
+          await this.openProject(root, this.conv.id);
+          this.deps.send(this.conversationMessage());
+          return;
+        }
         if (this.busy) {
           this.pendingProject = { root, conversationId: msg.conversationId };
           return;

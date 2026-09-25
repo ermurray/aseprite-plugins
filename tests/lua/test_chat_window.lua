@@ -102,3 +102,36 @@ T.test("sending a message attaches the context and the attach flag, then clears 
   T.eq(type(msg.context.openSprites), "table")
   T.eq(w.attachNext, false)
 end)
+
+T.test("a saved sprite outside any project shows the setup hint once; a project clears it", function()
+  F.closeAll()
+  local w = stubbed({})
+  local outside = app.fs.joinPath(F.tmp, "loose " .. os.time())
+  app.fs.makeAllDirectories(outside)
+  local s = Sprite(2, 2)
+  s:saveAs(app.fs.joinPath(outside, "loose.aseprite"))
+  app.sprite = s
+  w:maybeShowSetupHint()
+  w:maybeShowSetupHint()
+  local hints = 0
+  for _, it in ipairs(w.model.items) do if it.kind == "setup" then hints = hints + 1 end end
+  T.eq(hints, 1)
+  w:setProject(root)
+  for _, it in ipairs(w.model.items) do T.eq(it.kind ~= "setup", true) end
+  sprites.projectRoot = nil
+end)
+
+T.test("finishSetup switches to the new project and brings the current chat along", function()
+  local p = {}
+  prefs.setConversation(p, nil, "loose-chat")
+  local w = stubbed(p)
+  w.conn.status = "connected"
+  w.model:addUser("earlier")
+  w:finishSetup(root, true)
+  T.eq(w.projectRoot, root)
+  T.deepEq(w.sent[#w.sent], { type = "open_project", projectRoot = root, adoptConversationId = "loose-chat" })
+  T.eq(w.model.items[#w.model.items].kind, "notice")
+  w:finishSetup(root, false)
+  T.eq(w.sent[#w.sent].adoptConversationId, nil)
+  sprites.projectRoot = nil
+end)

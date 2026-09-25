@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResumeState } from "./adapters/Adapter.js";
 
@@ -56,6 +56,12 @@ export class ConversationStore {
       if (c) out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt });
     }
     return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async remove(id: string): Promise<void> {
+    if (!SAFE_ID.test(id)) return;
+    await this.pending.get(id)?.catch(() => {});
+    await rm(join(this.dir, `${id}.json`), { force: true });
   }
 
   /** Snapshots `c` now and writes it after any earlier save of the same conversation. */

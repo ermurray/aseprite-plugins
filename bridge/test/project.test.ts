@@ -50,5 +50,6 @@ describe("project helpers", () => {
     expect(withNotes).toContain("propose_memory");
     expect(buildSystemPrompt("BASE", { name: "Game", notes: { brief: "", memory: "" } })).toContain("no brief yet");
     expect(buildSystemPrompt("BASE", undefined)).toContain("There is no project open");
+    expect(buildSystemPrompt("BASE", undefined)).toContain("Set up project");
   });
 });

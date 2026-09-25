@@ -330,7 +330,7 @@ export const TOOL_DEFS: ToolDef[] = [
     summarize: (a) => `Save to project memory: "${a.note}"`,
     runInBridge: async (a, env) => {
       if (!env.projectRoot) {
-        return { ok: false, error: 'There is no project yet. The artist can create one with "Make project" in the chat window.' };
+        return { ok: false, error: 'There is no project yet. The artist can press "Set up project" in the chat window.' };
       }
       await appendMemory(env.projectRoot, String(a.note));
       return { ok: true, data: { saved: true } };
