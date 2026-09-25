@@ -12,6 +12,7 @@ local maps = require("agent.tools.maps")
 local builtin = require("agent.tools.builtin")
 local toolstate = require("agent.tools.toolstate")
 local extensions = require("agent.tools.extensions")
+local scripts = require("agent.tools.scripts")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -46,6 +47,8 @@ registry.register({
   make_normal_map = maps.make_normal_map,
   builtin_fx = builtin.builtin_fx,
   run_extension_command = extensions.run_extension_command,
+  write_script = scripts.write_script,
+  run_script = scripts.run_script,
 }, "edit")
 
 registry.register({ set_tool = toolstate.set_tool }, "setting")
