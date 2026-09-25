@@ -85,6 +85,21 @@ end
 
 local counter = 0
 
+-- Scales an image for Claude and saves it as a snapshot PNG in the bridge's folder.
+function M.saveSnapshot(img, sprite, info, maxSize)
+  if not M.snapshotDir then error("Snapshot directory unknown (bridge not connected).", 0) end
+  local scale = M.snapshotScale(img.width, img.height, maxSize or 512)
+  if scale ~= 1 then
+    img:resize(math.max(1, math.floor(img.width * scale + 0.5)), math.max(1, math.floor(img.height * scale + 0.5)))
+  end
+  counter = counter + 1
+  local path = app.fs.joinPath(M.snapshotDir, ("aseagent-%d-%d.png"):format(os.time(), counter))
+  img:saveAs{ filename = path, palette = sprite.palettes[1] }
+  local out = { pngPath = path, sprite = sprites.name(sprite), width = img.width, height = img.height, scale = scale }
+  for k, v in pairs(info or {}) do out[k] = v end
+  return out
+end
+
 function M.get_snapshot(args)
   local s = sprites.resolve(args.sprite)
   local frame = sprites.frame(s, args.frame)
@@ -94,24 +109,7 @@ function M.get_snapshot(args)
     region = clip(s, args.region)
     img = Image(img, Rectangle(region.x, region.y, region.w, region.h))
   end
-  if not M.snapshotDir then error("Snapshot directory unknown (bridge not connected).", 0) end
-  local scale = M.snapshotScale(img.width, img.height, args.maxSize or 512)
-  if scale ~= 1 then
-    img:resize(math.max(1, math.floor(img.width * scale + 0.5)), math.max(1, math.floor(img.height * scale + 0.5)))
-  end
-  counter = counter + 1
-  local path = app.fs.joinPath(M.snapshotDir, ("aseagent-%d-%d.png"):format(os.time(), counter))
-  img:saveAs{ filename = path, palette = s.palettes[1] }
-  return {
-    pngPath = path,
-    sprite = sprites.name(s),
-    frame = frame.frameNumber,
-    layer = args.layer,
-    region = region,
-    width = img.width,
-    height = img.height,
-    scale = scale,
-  }
+  return M.saveSnapshot(img, s, { frame = frame.frameNumber, layer = args.layer, region = region }, args.maxSize)
 end
 
 function M.get_pixels(args)

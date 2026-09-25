@@ -8,6 +8,7 @@ local annotate = require("agent.tools.annotate")
 local transform = require("agent.tools.transform")
 local analyze = require("agent.tools.analyze")
 local fx = require("agent.tools.fx")
+local maps = require("agent.tools.maps")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -17,6 +18,8 @@ registry.register({
   analyze_colors = analyze.analyze_colors,
   list_open_sprites = analyze.list_open_sprites,
   list_project_sprites = analyze.list_project_sprites,
+  check_readability = maps.check_readability,
+  light_preview = maps.light_preview,
 }, "read")
 
 registry.register({
@@ -35,6 +38,7 @@ registry.register({
   snap_to_palette = fx.snap_to_palette,
   selout = fx.selout,
   layer_style = fx.layer_style,
+  make_normal_map = maps.make_normal_map,
 }, "edit")
 
 return registry
