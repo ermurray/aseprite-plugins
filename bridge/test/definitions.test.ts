@@ -7,7 +7,7 @@ describe("tool definitions", () => {
     const names = TOOL_DEFS.map((d) => d.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names.sort()).toEqual([
-      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "builtin_fx", "check_readability", "create_draft_layer", "dither", "find_extensions", "frame_ops", "get_tool_state", "gradient_fill", "layer_style", "light_preview", "list_installed_extensions", "make_normal_map", "pixel_perfect", "run_extension_command", "run_script", "selout", "set_tool", "snap_to_palette", "write_script", "get_palette",
+      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "builtin_fx", "check_readability", "create_draft_layer", "delete_clip", "export_sprite", "import_from_sprite", "insert_clip", "list_clips", "pin_clip", "save_clip", "dither", "find_extensions", "frame_ops", "get_tool_state", "gradient_fill", "layer_style", "light_preview", "list_installed_extensions", "make_normal_map", "pixel_perfect", "run_extension_command", "run_script", "selout", "set_tool", "snap_to_palette", "write_script", "get_palette",
       "get_pixels", "get_snapshot", "get_sprite_info", "layer_ops", "list_open_sprites", "list_project_sprites", "propose_brief_change", "propose_memory", "replace_color",
       "set_palette", "set_pixels", "transform",
     ].sort());
@@ -96,5 +96,18 @@ describe("tool definitions", () => {
     for (const n of ["write_script", "run_script", "run_extension_command"]) expect(toolDef(n)!.alwaysAsk).toBe(true);
     expect(toolDef("write_script")!.summarize!({ name: "a", description: "d", code: "x", replace: true })).toContain("Replace the script");
     expect(toolDef("run_extension_command")!.summarize!({ command: "Foo" })).toBe('Run the Aseprite command "Foo" (not undoable as one step)');
+  });
+  it("exports and clip deletion always ask; summaries name the files' fate", () => {
+    expect(toolDef("export_sprite")!.alwaysAsk).toBe(true);
+    expect(toolDef("delete_clip")!.alwaysAsk).toBe(true);
+    expect(toolDef("export_sprite")!.summarize!({ sprite: "knight.aseprite", format: "sheet", scale: 2, includeNormal: true })).toBe(
+      "Export knight.aseprite as a sprite sheet + JSON at 2x, plus its normal map (_n), next to the sprite (or per project settings)",
+    );
+    expect(toolDef("export_sprite")!.summarize!({ format: "gif", destination: "../game/assets" })).toBe(
+      "Export the active sprite as a GIF to ../game/assets",
+    );
+    expect(toolDef("import_from_sprite")!.summarize!({ from: "knight.aseprite", layer: "Head", flip: "horizontal" })).toBe(
+      'Import knight.aseprite > "Head" into the active sprite as a new layer (flipped horizontally)',
+    );
   });
 });

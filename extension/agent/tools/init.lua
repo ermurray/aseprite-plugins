@@ -13,6 +13,9 @@ local builtin = require("agent.tools.builtin")
 local toolstate = require("agent.tools.toolstate")
 local extensions = require("agent.tools.extensions")
 local scripts = require("agent.tools.scripts")
+local importer = require("agent.tools.importer")
+local cliptools = require("agent.tools.clips")
+local export = require("agent.tools.export")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -26,6 +29,9 @@ registry.register({
   light_preview = maps.light_preview,
   get_tool_state = toolstate.get_tool_state,
   list_installed_extensions = extensions.list_installed_extensions,
+  list_clips = cliptools.list_clips,
+  preview_export = export.preview_export,
+  preview_save_clip = cliptools.preview_save_clip,
 }, "read")
 
 registry.register({
@@ -49,6 +55,12 @@ registry.register({
   run_extension_command = extensions.run_extension_command,
   write_script = scripts.write_script,
   run_script = scripts.run_script,
+  import_from_sprite = importer.import_from_sprite,
+  save_clip = cliptools.save_clip,
+  insert_clip = cliptools.insert_clip,
+  delete_clip = cliptools.delete_clip,
+  pin_clip = cliptools.pin_clip,
+  export_sprite = export.export_sprite,
 }, "edit")
 
 registry.register({ set_tool = toolstate.set_tool }, "setting")
