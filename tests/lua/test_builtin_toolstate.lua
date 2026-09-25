@@ -1,0 +1,62 @@
+local T = require("testlib")
+local F = require("fixtures")
+local tools = require("agent.tools")
+local extensions = require("agent.tools.extensions")
+local pc = app.pixelColor
+
+local function call(name, args) return tools.dispatch(name, F.decode(args or {})) end
+
+T.test("builtin invert changes the layer in one undo and respects a region", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  local r = call("builtin_fx", { layer = "Body", effect = "invert", region = { x = 0, y = 0, w = 1, h = 1 } })
+  T.eq(r.ok, true, r.error)
+  T.eq(F.px(s, 0, 0, "Body"), pc.rgba(0, 255, 255, 255))
+  T.eq(F.px(s, 1, 0, "Body"), pc.rgba(0, 255, 0, 255), "outside the region untouched")
+  T.eq(s.selection.isEmpty, true, "the artist's (empty) selection is restored")
+  app.undo()
+  T.eq(F.px(s, 0, 0, "Body"), pc.rgba(255, 0, 0, 255))
+end)
+
+T.test("builtin blur and replace_color map to Aseprite's commands", function()
+  F.closeAll()
+  local s = F.rgbSprite()
+  T.eq(call("builtin_fx", { layer = "Body", effect = "replace_color", from = "#ff0000", to = "#0000ff" }).ok, true)
+  T.eq(F.px(s, 0, 0, "Body"), pc.rgba(0, 0, 255, 255))
+  T.eq(call("builtin_fx", { layer = "Body", effect = "blur", size = 3 }).ok, true)
+  T.eq(call("builtin_fx", { layer = "Body", effect = "sharpen", size = 9 }).error, "sharpen supports sizes 3, 5 and 7.")
+end)
+
+T.test("set_tool applies tool, brush, ink, colors and symmetry; get_tool_state reports them", function()
+  F.closeAll()
+  F.rgbSprite()
+  local r = call("set_tool", { tool = "pencil", brushSize = 3, brushShape = "square", ink = "shading", foreground = "#102030", symmetry = "horizontal" })
+  T.eq(r.ok, true, r.error)
+  local st = call("get_tool_state").data
+  T.eq(st.tool, "pencil")
+  T.eq(st.brush.size, 3)
+  T.eq(st.brush.shape, "square")
+  T.eq(st.ink, "shading")
+  T.eq(st.foreground, "#102030")
+  T.eq(st.symmetry, "horizontal")
+end)
+
+T.test("set_tool reports bad values plainly and notes symmetry needs a sprite", function()
+  F.closeAll()
+  T.eq(call("set_tool", { tool = "lightsaber" }).error, "Unknown tool 'lightsaber'.")
+  local r = call("set_tool", { symmetry = "both", brushSize = 2 })
+  T.eq(r.ok, true, r.error)
+  T.eq(r.data.skipped[1], "symmetry (no sprite open)")
+end)
+
+T.test("extension commands: dangerous ones are refused, unknown ones explained", function()
+  T.eq(extensions.DENY.Exit, true)
+  T.eq(call("run_extension_command", { command = "Exit" }).error, "The command 'Exit' can't be run from the chat.")
+  T.eq(call("run_extension_command", { command = "NoSuchCommandXyz" }).error,
+    "Aseprite has no command 'NoSuchCommandXyz'. Check the extension's menu or docs for its command id.")
+  local list = call("list_installed_extensions")
+  T.eq(list.ok, true, list.error)
+  T.eq(type(list.data.extensions), "table")
+end)
+
+F.closeAll()

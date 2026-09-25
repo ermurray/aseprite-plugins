@@ -9,6 +9,9 @@ local transform = require("agent.tools.transform")
 local analyze = require("agent.tools.analyze")
 local fx = require("agent.tools.fx")
 local maps = require("agent.tools.maps")
+local builtin = require("agent.tools.builtin")
+local toolstate = require("agent.tools.toolstate")
+local extensions = require("agent.tools.extensions")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -20,6 +23,8 @@ registry.register({
   list_project_sprites = analyze.list_project_sprites,
   check_readability = maps.check_readability,
   light_preview = maps.light_preview,
+  get_tool_state = toolstate.get_tool_state,
+  list_installed_extensions = extensions.list_installed_extensions,
 }, "read")
 
 registry.register({
@@ -39,6 +44,10 @@ registry.register({
   selout = fx.selout,
   layer_style = fx.layer_style,
   make_normal_map = maps.make_normal_map,
+  builtin_fx = builtin.builtin_fx,
+  run_extension_command = extensions.run_extension_command,
 }, "edit")
+
+registry.register({ set_tool = toolstate.set_tool }, "setting")
 
 return registry
