@@ -400,3 +400,15 @@ interface; approval, the draft lock, persistence, and tools are shared.
 - **Adapter interface delta (supersedes §10 sketch):** adapters receive a `ToolHost` and call tools directly (matching SDK in-process MCP handlers) instead of yielding `tool_call` events. The approval gate wraps the `ToolHost`, so all adapters still inherit it.
 - Snapshots are written to a bridge-owned dir (`~/.aseprite-agent/tmp`, announced in `ready`); the bridge only reads/deletes `aseagent-*.png` files directly inside it.
 - The Aseprite UI font can't render emoji: buttons are text-labelled (e.g. "Attach", "Clip") rather than 📎/📌.
+
+## 15. FX, tools and scripts (added 2026-09-24, Plan 4)
+
+The artist asked for help with effects, extensions and Aseprite's tools, in every mode:
+
+- **Hand-built pixel-art FX** (MIT, tested, one undo each, approval cards): dithering (Bayer 2x2/4x4, checker), pixel-perfect cleanup (L-corners → diagonals), snap to palette (project or sprite palette, redmean nearest), selective outline (selout), gradient fill with optional dither, and layer styles (color overlay, stroke and drop shadow on new layers). FX run on RGB sprites.
+- **Height and normal maps** from a layer: height from brightness, edge distance ("pillow" bevel), or both; normals via Sobel with a strength setting, an OpenGL (+Y, the default) or DirectX convention, and optional pixel-art quantizing. All frames are processed. Output goes to companion files next to the source: `<name>_height.aseprite` and `<name>_normal.aseprite`.
+- **Read-only analysis for teaching:** a value/silhouette readability check and a lit preview using the normals with a chosen light direction. Both are returned as snapshots and never change the sprite.
+- **Aseprite built-ins** run through `app.command` inside one transaction (verified headless): BrightnessContrast, HueSaturation, InvertColor, Despeckle, ConvolutionMatrix (the presets in `convmatr.def`), ReplaceColor. ColorCurve is dropped, because it has no effect without curve points.
+- **Tool setup, no approval card** (a setting, not art): tool, brush size/shape/angle (via `app.preferences.tool(id).brush`, since `app.brush` doesn't apply in scripts), ink, foreground/background colors, symmetry, tiled mode. Plus a read-only query of the current tool state.
+- **Extensions:** a curated catalog (name, purpose, link, license) that Claude recommends from. Nothing is bundled: most community scripts are unlicensed or GPL, which is incompatible with bundling in an MIT extension. Claude can list installed extensions and run an installed extension's command (by id, with an approval card, and with dangerous built-ins denied).
+- **Custom scripts:** Claude writes Lua; an approval card shows the full code and saves it to `<Aseprite user folder>/scripts/Agent/<name>.lua` (the File > Scripts > Agent menu). Running it is a separate approval: it runs once inside a transaction with `print` captured, and errors go back to Claude.
