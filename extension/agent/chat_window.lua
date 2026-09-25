@@ -8,6 +8,7 @@ local prefs = require("agent.prefs")
 local context = require("agent.context")
 local sprites = require("agent.tools.sprites")
 local palettes = require("agent.palettes")
+local clips = require("agent.clips")
 local edit = require("agent.tools.edit")
 
 local ChatWindow = {}
@@ -101,6 +102,7 @@ function ChatWindow:build()
     end,
   }
   dlg:button{ id = "history", text = "History", onclick = function() self.conn:send{ type = "list_history" } end }
+  dlg:button{ id = "clips", text = "Clips", onclick = function() self:showClips() end }
   dlg:newrow()
   dlg:label{ id = "status", text = STATUS_TEXT.disconnected }
   dlg:newrow()
@@ -585,6 +587,122 @@ function ChatWindow:finishSetup(root, adopt)
   end
   self.model:addNotice("Project " .. self.projectName .. " is ready. Its brief is in .artproject/brief.md; edit it any time.")
   self:repaint()
+end
+
+function ChatWindow:showClips()
+  local root = self.projectRoot
+  if not root then
+    ChatWindow.showTip("Clips are kept in a project. Press Set up project first.")
+    return
+  end
+  local filter = ""
+  while true do
+    local list = clips.list(root, filter)
+    local labels, byLabel = {}, {}
+    for _, c in ipairs(list) do
+      local l = clips.label(c)
+      labels[#labels + 1] = l
+      byLabel[l] = c
+    end
+    local d = Dialog{ title = "Clips in " .. self.projectName }
+    d:entry{ id = "filter", label = "Filter", text = filter }
+    d:button{ id = "apply", text = "Filter" }
+    d:newrow()
+    if #labels == 0 then
+      d:label{ text = "No clips yet. Select an area and use Edit > Save Selection as Clip." }
+    else
+      d:combobox{ id = "clip", options = labels, option = labels[1], onchange = function() d:repaint() end }
+      d:canvas{
+        id = "preview", width = 160, height = 120,
+        onpaint = function(ev)
+          local c = byLabel[d.data.clip]
+          if not c then return end
+          local ok, frames = pcall(function()
+            local spr = Sprite{ fromFile = app.fs.joinPath(clips.dir(root), c.file) }
+            local img = Image(spr.cels[1].image)
+            spr:close()
+            return img
+          end)
+          if ok and frames then
+            local scale = math.max(1, math.floor(math.min(160 / frames.width, 120 / frames.height)))
+            ev.context:drawImage(frames, Rectangle(0, 0, frames.width, frames.height), Rectangle(0, 0, frames.width * scale, frames.height * scale))
+          end
+        end,
+      }
+      d:newrow()
+      d:button{ id = "insert", text = "Insert" }
+      d:button{ id = "rename", text = "Rename..." }
+      d:button{ id = "pin", text = "Pin / Unpin" }
+      d:button{ id = "delete", text = "Delete" }
+      d:button{ id = "clear", text = "Clear all..." }
+    end
+    d:button{ id = "close", text = "Close" }
+    d:show()
+    local data = d.data
+    local c = data.clip and byLabel[data.clip]
+    if data.apply then
+      filter = data.filter or ""
+    elseif data.insert and c then
+      local r = require("agent.tools").dispatch("insert_clip", { name = c.name })
+      ChatWindow.showTip(r.ok and ("Inserted clip " .. c.name) or tostring(r.error))
+      self:repaint()
+      return
+    elseif data.rename and c then
+      local r = Dialog{ title = "Rename clip" }
+      r:entry{ id = "name", label = "New name", text = c.name }
+      r:button{ id = "ok", text = "Rename", focus = true }
+      r:button{ id = "cancel", text = "Cancel" }
+      r:show()
+      if r.data.ok then
+        local ok, err = pcall(clips.rename, root, c.name, r.data.name)
+        if not ok then ChatWindow.showTip(tostring(err)) end
+      end
+    elseif data.pin and c then
+      clips.pin(root, c.name, not c.pinned)
+    elseif data.delete and c then
+      clips.delete(root, c.name)
+    elseif data.clear then
+      local answer = app.alert{ title = "Clear clips", text = "Delete every clip in this project?", buttons = { "Unpinned only", "Including pinned", "Cancel" } }
+      if answer == 1 then clips.clear(root, false) elseif answer == 2 then clips.clear(root, true) end
+    else
+      return
+    end
+  end
+end
+
+-- Edit > Save Selection as Clip (works without the chat window open).
+function ChatWindow.saveSelectionAsClip()
+  local s = app.sprite
+  local root = s and project.findRoot(s.filename)
+  if not root then
+    ChatWindow.showTip("Clips are kept in a project. Press Set up project first.")
+    return
+  end
+  local d = Dialog{ title = "Save Selection as Clip" }
+  d:entry{ id = "name", label = "Name", text = "" }
+  d:entry{ id = "tags", label = "Tags (comma separated)", text = "" }
+  d:check{ id = "layerOnly", text = "Only the active layer", selected = false }
+  d:button{ id = "ok", text = "Save", focus = true }
+  d:button{ id = "cancel", text = "Cancel" }
+  d:show()
+  if not d.data.ok then return end
+  local tags = {}
+  for t in (d.data.tags or ""):gmatch("[^,]+") do tags[#tags + 1] = t:match("^%s*(.-)%s*$") end
+  local region
+  if not s.selection.isEmpty then
+    local b = s.selection.bounds
+    region = { x = b.x, y = b.y, w = b.width, h = b.height }
+  end
+  local ok, entry, evicted = pcall(clips.save, root, s, {
+    name = d.data.name, tags = tags, region = region,
+    layer = d.data.layerOnly and app.layer and app.layer.name or nil,
+    frames = { app.frame and app.frame.frameNumber or 1 },
+  })
+  if not ok then
+    ChatWindow.showTip(tostring(entry))
+  else
+    ChatWindow.showTip("Saved clip " .. entry.name .. (evicted and (" (removed " .. evicted .. ", limit reached)") or ""))
+  end
 end
 
 return ChatWindow

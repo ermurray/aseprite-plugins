@@ -14,6 +14,12 @@ function init(plugin)
       window:toggle()
     end,
   }
+  plugin:newCommand{
+    id = "AgentSaveClip",
+    title = "Save Selection as Clip",
+    group = "edit_insert",
+    onclick = function() ChatWindow.saveSelectionAsClip() end,
+  }
 end
 
 function exit(plugin)

@@ -181,3 +181,14 @@ T.test("the setup hint survives the bridge's conversation reply", function()
   for _, it in ipairs(w.model.items) do if it.kind == "setup" then hint = true end end
   T.eq(hint, true)
 end)
+
+T.test("the Clips button explains that clips need a project", function()
+  local tips = {}
+  local real = ChatWindow.showTip
+  ChatWindow.showTip = function(t) tips[#tips + 1] = t end
+  local w = stubbed({})
+  w.projectRoot = nil
+  w:showClips()
+  T.eq(tips[1], "Clips are kept in a project. Press Set up project first.")
+  ChatWindow.showTip = real
+end)
