@@ -1,7 +1,9 @@
+local launcher = require("agent.launcher")
+
 local Connection = {}
 Connection.__index = Connection
 
-local VERSION = "0.1.0"
+local VERSION = "0.9.0"
 
 function Connection.infoPath()
   local home = os.getenv("ASEPRITE_AGENT_HOME")
@@ -44,9 +46,17 @@ end
 
 function Connection:connect()
   self:close()
-  local info = Connection.readBridgeInfo(Connection.infoPath())
+  local path = Connection.infoPath()
+  local info = Connection.readBridgeInfo(path)
   if not info then
-    self:setStatus("disconnected", "Bridge not running")
+    self:setStatus("disconnected", "Assistant not running")
+    if self.opts.onNeedsBridge then self.opts.onNeedsBridge("missing") end
+    return false
+  end
+  if info.pid and not launcher.pidAlive(info.pid) then
+    os.remove(path)
+    self:setStatus("disconnected", "Assistant not running")
+    if self.opts.onNeedsBridge then self.opts.onNeedsBridge("stale") end
     return false
   end
   self.token = info.token

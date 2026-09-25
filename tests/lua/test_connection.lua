@@ -1,4 +1,5 @@
 local T = require("testlib")
+local F = require("fixtures")
 local Connection = require("agent.connection")
 
 T.test("readBridgeInfo parses bridge.json written by the bridge", function()
@@ -50,4 +51,21 @@ T.test("hello carries the project and the conversation to resume", function()
   T.eq(sent[1].type, "hello")
   T.eq(sent[1].projectRoot, "/art/game")
   T.eq(sent[1].conversationId, "conv-1")
+end)
+
+T.test("a missing or stale bridge.json asks for a bridge instead of dialing a dead port", function()
+  local home = F.unique("agent home")
+  app.fs.makeAllDirectories(home)
+  local asked = {}
+  local c = Connection.new{ onMessage = function() end, onStatus = function() end, onNeedsBridge = function(r) asked[#asked + 1] = r end }
+  local realPath = Connection.infoPath
+  Connection.infoPath = function() return app.fs.joinPath(home, "bridge.json") end
+  T.eq(c:connect(), false)
+  T.eq(asked[1], "missing")
+  local f = io.open(app.fs.joinPath(home, "bridge.json"), "w")
+  f:write('{"port":47999,"token":"t","pid":999999}'); f:close()
+  T.eq(c:connect(), false)
+  T.eq(asked[2], "stale")
+  T.eq(app.fs.isFile(app.fs.joinPath(home, "bridge.json")), false, "stale file removed")
+  Connection.infoPath = realPath
 end)

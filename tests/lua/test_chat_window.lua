@@ -192,3 +192,17 @@ T.test("the Clips button explains that clips need a project", function()
   T.eq(tips[1], "Clips are kept in a project. Press Set up project first.")
   ChatWindow.showTip = real
 end)
+
+T.test("startBridge reports a missing Node clearly and doesn't retry in a tight loop", function()
+  local launcher = require("agent.launcher")
+  local realStart = launcher.start
+  local calls = 0
+  launcher.start = function() calls = calls + 1; return { ok = false, error = "Node.js 20 or newer is needed to run the assistant.", hint = "Install it" } end
+  local w = stubbed({})
+  w.pluginPath = "/nowhere"
+  w:startBridge("missing")
+  w:startBridge("missing")
+  T.eq(calls, 1, "a second request within 15s doesn't start again")
+  T.eq(w.model.items[#w.model.items].text, "Node.js 20 or newer is needed to run the assistant.\nInstall it")
+  launcher.start = realStart
+end)

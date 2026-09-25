@@ -7,6 +7,7 @@ local project = require("agent.project")
 local prefs = require("agent.prefs")
 local context = require("agent.context")
 local sprites = require("agent.tools.sprites")
+local launcher = require("agent.launcher")
 local palettes = require("agent.palettes")
 local clips = require("agent.clips")
 local edit = require("agent.tools.edit")
@@ -18,7 +19,8 @@ local PAD, GAP = 6, 8
 local STATUS_TEXT = {
   connected = "Connected",
   connecting = "Connecting...",
-  disconnected = "Bridge not running - start it with: cd bridge && npm start",
+  starting = "Starting the assistant...",
+  disconnected = "Assistant not running",
 }
 local COLORS = {
   user_label = Color{ r = 110, g = 160, b = 255 },
@@ -58,6 +60,7 @@ function ChatWindow.new(opts)
     projectRoot = nil,
     projectName = "No project",
     attachNext = false,
+    pluginPath = opts.pluginPath,
     tick = 0,
   }, ChatWindow)
   self.unlockTimer = Timer{
@@ -78,6 +81,7 @@ function ChatWindow.new(opts)
   self.conn = Connection.new{
     onMessage = function(m) self:onMessage(m) end,
     onStatus = function(s, d) self:onStatus(s, d) end,
+    onNeedsBridge = function(reason) self:startBridge(reason) end,
     helloFields = function()
       return { projectRoot = self.projectRoot, conversationId = prefs.getConversation(self.opts.prefs, self.projectRoot) }
     end,
@@ -222,10 +226,43 @@ function ChatWindow:toggle()
   end
 end
 
+-- Starts the bundled bridge (at most once per 15s) and keeps trying to connect for 15s.
+function ChatWindow:startBridge(reason)
+  local now = os.clock()
+  if self.lastStart and now - self.lastStart < 15 then return end
+  self.lastStart = now
+  local r = launcher.start(self.pluginPath or "", { preferred = self.opts.prefs.nodePath })
+  if not r.ok then
+    self.model:addLocalError(r.error, r.hint)
+    self:repaint()
+    return
+  end
+  if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT.starting } end
+  local tries = 0
+  self.startTimer = Timer{
+    interval = 0.5,
+    ontick = function()
+      tries = tries + 1
+      local info = Connection.readBridgeInfo(Connection.infoPath())
+      if info then
+        self.startTimer:stop()
+        self.conn:connect()
+      elseif tries >= 30 then
+        self.startTimer:stop()
+        self.model:addLocalError("The assistant's bridge didn't start.", "See " .. r.log .. ".")
+        if self.open then self.dlg:modify{ id = "status", text = STATUS_TEXT.disconnected } end
+        self:repaint()
+      end
+    end,
+  }
+  self.startTimer:start()
+end
+
 -- Full shutdown (extension unload).
 function ChatWindow:close()
   self.timer:stop()
   self.unlockTimer:stop()
+  if self.startTimer then self.startTimer:stop() end
   self.conn:close()
   pcall(function() app.events:off(self.siteListener) end)
   if self.open then self.dlg:close() end
@@ -291,7 +328,7 @@ function ChatWindow:onSendOrStop()
     return
   end
   if self.conn.status ~= "connected" then
-    self.model:addLocalError("Not connected to the bridge.", "Start it with: cd bridge && npm start, then press Reconnect.")
+    self.model:addLocalError("Not connected to the bridge.", "Press Reconnect; the assistant starts automatically.")
     self:repaint()
     return
   end
