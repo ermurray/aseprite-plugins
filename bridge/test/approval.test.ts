@@ -183,7 +183,7 @@ describe("draft mode", () => {
     const before = c.received.length;
     c.send({ type: "user_message", text: "again" });
     await c.waitFor((m) => m.type === "turn_done" && c.received.indexOf(m) >= before);
-    expect(seen).toEqual(["[AI drafts: off]\nhello", "[AI drafts: on]\nagain"]);
+    expect(seen).toEqual(["[active: none | AI drafts: off]\nhello", "[active: none | AI drafts: on]\nagain"]);
   });
 
   it("add_color_ramp is forwarded as add_palette_colors", async () => {

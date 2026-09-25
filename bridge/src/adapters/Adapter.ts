@@ -10,7 +10,7 @@ export type ResumeState = Record<string, unknown>;
 export interface Adapter {
   readonly name: string;
   /** Runs one user turn, yielding events until the agent has finished replying. */
-  send(text: string): AsyncIterable<AdapterEvent>;
+  send(text: string, opts?: { systemPrompt?: string }): AsyncIterable<AdapterEvent>;
   cancel(): void;
   resumeState(): ResumeState | undefined;
 }

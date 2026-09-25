@@ -2,6 +2,9 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Adapter, AdapterFactory } from "./adapters/Adapter.js";
 import { ALLOWED_COMMANDS, parseCommand } from "./commands.js";
 import { ConversationStore, HistoryRecorder, summarize, type Conversation } from "./conversations.js";
+import { buildSystemPrompt, isProjectRoot, projectName, readProjectNotes } from "./project.js";
+import { formatStamp, type MessageContext } from "./stamp.js";
+import type { StoreRegistry } from "./stores.js";
 import { PROTOCOL_VERSION, parseExtensionMessage, type BridgeMessage } from "./protocol.js";
 import { ToolBroker } from "./toolBroker.js";
 import { isDraftLayer } from "./tools/constants.js";
@@ -17,7 +20,7 @@ export interface SessionDeps {
   snapshotDir: string;
   toolTimeoutMs?: number;
   /** Where conversations are saved; without one they live only as long as the connection. */
-  store?: ConversationStore;
+  stores?: StoreRegistry;
 }
 
 function tokensMatch(a: string, b: string): boolean {
@@ -35,6 +38,9 @@ export class Session {
   private draftMode = false;
   private approvals = new Map<string, (approved: boolean) => void>();
   private turnCancelled = false;
+  private projectRoot: string | null = null;
+  private pendingProject?: { root: string | null; conversationId?: string };
+  private lastContext?: MessageContext;
   private conv: Conversation = new ConversationStore("").create();
   private history = new HistoryRecorder(this.conv.items);
 
@@ -54,12 +60,13 @@ export class Session {
           const rejection = this.checkDraftLock(def, args);
           if (rejection) return { ok: false, error: rejection };
           if (!this.autoApprove) {
-            const approved = await this.askApproval(def.summarize!(args), args.sprite);
+            const approved = await this.askApproval(this.summaryFor(def, args), args.sprite);
             if (stale()) return { ok: false, error: "Chat reset" };
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
           }
         }
         this.emit({ type: "tool_activity", summary: def.activity(args) });
+        if (def.runInBridge) return def.runInBridge(args, { projectRoot: this.projectRoot });
         const fwd = def.forward ? def.forward(args) : { name, args };
         return this.broker.call(fwd.name, fwd.args);
       },
@@ -89,14 +96,14 @@ export class Session {
         return;
       }
       this.authed = true;
-      const id = parsed.message.conversationId;
-      const saved = id ? await this.deps.store?.load(id) : undefined;
-      this.useConversation(saved ?? this.newConversation());
+      await this.openProject(await this.validRoot(parsed.message.projectRoot), parsed.message.conversationId);
       this.deps.send({
         type: "ready",
         adapter: this.adapter!.name,
         protocolVersion: PROTOCOL_VERSION,
         snapshotDir: this.deps.snapshotDir,
+        projectRoot: this.projectRoot,
+        projectName: projectName(this.projectRoot),
         conversationId: this.conv.id,
         history: this.conv.items,
       });
@@ -111,7 +118,7 @@ export class Session {
       case "hello":
         return;
       case "user_message":
-        return this.runTurn(msg.text);
+        return this.runTurn(msg.text, msg.context, msg.attach);
       case "cancel":
         this.cancel("Cancelled by user");
         return;
@@ -131,6 +138,33 @@ export class Session {
       case "set_draft_mode":
         this.draftMode = msg.enabled;
         return;
+      case "open_project": {
+        const root = await this.validRoot(msg.projectRoot);
+        if (this.busy) {
+          this.pendingProject = { root, conversationId: msg.conversationId };
+          return;
+        }
+        await this.openProject(root, msg.conversationId);
+        this.deps.send(this.conversationMessage());
+        return;
+      }
+      case "list_history":
+        this.deps.send({ type: "history_list", items: (await this.store()?.list()) ?? [] });
+        return;
+      case "open_conversation": {
+        if (this.busy) {
+          this.deps.send({ type: "error", message: "Finish or stop the current reply before opening another chat." });
+          return;
+        }
+        const saved = await this.store()?.load(msg.conversationId);
+        if (!saved) {
+          this.deps.send({ type: "error", message: "That chat no longer exists." });
+          return;
+        }
+        this.useConversation(saved);
+        this.deps.send(this.conversationMessage());
+        return;
+      }
       case "tool_result":
         this.broker.resolve(msg.callId, msg.ok ? { ok: true, data: msg.data } : { ok: false, error: msg.error ?? "Unknown tool error" });
         return;
@@ -154,11 +188,51 @@ export class Session {
     this.cancel("Chat reset");
     this.useConversation(this.newConversation());
     this.busy = false;
-    this.deps.send({ type: "conversation", conversationId: this.conv.id, history: this.conv.items });
+    this.deps.send(this.conversationMessage());
   }
 
   private newConversation(): Conversation {
-    return (this.deps.store ?? new ConversationStore("")).create();
+    return (this.store() ?? new ConversationStore("")).create();
+  }
+
+  private store(): ConversationStore | undefined {
+    return this.deps.stores?.get(this.projectRoot);
+  }
+
+  private async validRoot(root: unknown): Promise<string | null> {
+    return (await isProjectRoot(root)) ? (root as string) : null;
+  }
+
+  /** Opens a project's conversation (the given one if it exists there, else a new one). */
+  private async openProject(root: string | null, conversationId?: string): Promise<void> {
+    this.projectRoot = root;
+    const saved = conversationId ? await this.store()?.load(conversationId) : undefined;
+    this.useConversation(saved ?? this.newConversation());
+  }
+
+  private conversationMessage(): BridgeMessage {
+    return {
+      type: "conversation",
+      conversationId: this.conv.id,
+      projectRoot: this.projectRoot,
+      projectName: projectName(this.projectRoot),
+      history: this.conv.items,
+    };
+  }
+
+  private async systemPromptNow(): Promise<string> {
+    if (!this.projectRoot || !(await isProjectRoot(this.projectRoot))) return buildSystemPrompt(this.deps.systemPrompt, undefined);
+    return buildSystemPrompt(this.deps.systemPrompt, { name: projectName(this.projectRoot), notes: await readProjectNotes(this.projectRoot) });
+  }
+
+  private summaryFor(def: ToolDef, args: Record<string, unknown>): string {
+    const summary = def.summarize!(args);
+    const open = this.lastContext?.openSprites;
+    const sprite = args.sprite;
+    if (typeof sprite === "string" && open && !open.includes(sprite) && !open.some((o) => o.endsWith(`/${sprite}`))) {
+      return `${summary} (opens it as a tab)`;
+    }
+    return summary;
   }
 
   /** Switches to a conversation and starts an adapter that resumes its agent session, if any. */
@@ -186,18 +260,18 @@ export class Session {
     this.deps.send(m);
   }
 
-  private async persist(conv: Conversation, adapter: Adapter): Promise<void> {
-    if (!this.deps.store) return;
+  private async persist(conv: Conversation, adapter: Adapter, store: ConversationStore | undefined): Promise<void> {
+    if (!store) return;
     conv.title = new HistoryRecorder(conv.items).title();
     conv.resume = adapter.resumeState() ?? conv.resume;
     try {
-      await this.deps.store.save(conv);
+      await store.save(conv);
     } catch (e) {
       console.error(`Could not save conversation ${conv.id}: ${(e as Error).message}`);
     }
   }
 
-  private async runTurn(text: string): Promise<void> {
+  private async runTurn(text: string, context?: MessageContext, attach = false): Promise<void> {
     if (this.busy) {
       this.deps.send({ type: "error", message: "Still working on the previous message. Press Stop or wait for it to finish." });
       return;
@@ -211,10 +285,12 @@ export class Session {
     this.busy = true;
     const adapter = this.adapter!;
     const conv = this.conv;
+    const store = this.store();
     const current = () => this.adapter === adapter;
+    this.lastContext = context;
     this.turnCancelled = false;
     this.history.user(text);
-    await this.persist(conv, adapter);
+    await this.persist(conv, adapter, store);
     try {
       // Stop, New chat or a disconnect during that save: don't start Claude at all.
       if (!current() || this.turnCancelled) return;
@@ -222,18 +298,24 @@ export class Session {
         this.emit({ type: "error", message: `/${cmd.name} isn't available in Aseprite.`, hint: "Try /compact, /context, /usage, /model, /effort, /recap or /clear." });
         return;
       }
-      // Slash commands go to Claude Code untouched; other messages carry the drafts switch.
-      const prompt = cmd ? cmd.raw : `[AI drafts: ${this.draftMode ? "on" : "off"}]\n${text}`;
-      for await (const ev of adapter.send(prompt)) if (current()) this.emit(ev);
+      // Slash commands go to Claude Code untouched; other messages carry the context stamp.
+      const prompt = cmd ? cmd.raw : `${formatStamp(context, this.draftMode, attach)}\n${text}`;
+      for await (const ev of adapter.send(prompt, { systemPrompt: await this.systemPromptNow() })) if (current()) this.emit(ev);
     } catch (e) {
       if (current()) this.emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {
       if (current()) this.history.endTurn();
-      await this.persist(conv, adapter);
+      await this.persist(conv, adapter, store);
       // A turn orphaned by New chat ends silently; the new chat is already idle.
       if (current()) {
         this.busy = false;
         this.deps.send({ type: "turn_done" });
+      }
+      if (current() && this.pendingProject) {
+        const next = this.pendingProject;
+        this.pendingProject = undefined;
+        await this.openProject(next.root, next.conversationId);
+        this.deps.send(this.conversationMessage());
       }
     }
   }

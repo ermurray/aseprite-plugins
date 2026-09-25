@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { DRAFT_LAYER, NOTES_LAYER } from "./constants.js";
 import { colorRamp } from "./ramp.js";
+import { appendMemory } from "../project.js";
+import type { ToolResult } from "../toolTypes.js";
 
 export type ToolKind = "read" | "edit";
 
@@ -14,6 +16,8 @@ export interface ToolDef {
   summarize?(args: Record<string, unknown>): string;
   /** The tool name and args actually sent to the extension. Defaults to this tool's own. */
   forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
+  /** Tools the bridge runs itself (no extension round-trip). */
+  runInBridge?(args: Record<string, unknown>, env: { projectRoot: string | null }): Promise<ToolResult>;
 }
 
 const spriteArg = z
@@ -308,6 +312,30 @@ export const TOOL_DEFS: ToolDef[] = [
     forward: (a) => ({ name: "ensure_draft_layer", args: { sprite: a.sprite } }),
   },
 
+  {
+    name: "list_project_sprites",
+    kind: "read",
+    description:
+      "List every .aseprite/.ase file in the current project (paths relative to the project folder) and whether each is open. Any of them can be passed as `sprite` to other tools, even if it is not open: reads open it in the background, edits open it as a tab.",
+    shape: {},
+    activity: () => "Listed the project's sprites",
+  },
+  {
+    name: "propose_memory",
+    kind: "edit",
+    description:
+      "Save a lasting project decision to the project's memory.md (one short sentence, e.g. 'Hero uses a 2px dark outline, never black'). The artist approves it first. Only works inside a project.",
+    shape: { note: z.string().min(3).max(300) },
+    activity: () => "Saved a note to project memory",
+    summarize: (a) => `Save to project memory: "${a.note}"`,
+    runInBridge: async (a, env) => {
+      if (!env.projectRoot) {
+        return { ok: false, error: 'There is no project yet. The artist can create one with "Make project" in the chat window.' };
+      }
+      await appendMemory(env.projectRoot, String(a.note));
+      return { ok: true, data: { saved: true } };
+    },
+  },
 ];
 
 export function toolDef(name: string): ToolDef | undefined {

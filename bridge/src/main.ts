@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { claudeCodeAdapterFactory } from "./adapters/claudeCode.js";
 import { DEFAULT_PORT, agentHome, chatsDirFor, removeBridgeInfo, snapshotDirFor, writeBridgeInfo } from "./config.js";
-import { ConversationStore } from "./conversations.js";
+import { StoreRegistry } from "./stores.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { startServer, type BridgeServer } from "./server.js";
 
@@ -20,7 +20,7 @@ try {
     token,
     systemPrompt: SYSTEM_PROMPT,
     snapshotDir,
-    store: new ConversationStore(chatsDirFor(home)),
+    stores: new StoreRegistry(chatsDirFor(home)),
     adapterFactory: claudeCodeAdapterFactory({ snapshotDir, model: process.env.ASEPRITE_AGENT_MODEL }),
   });
 } catch (e) {

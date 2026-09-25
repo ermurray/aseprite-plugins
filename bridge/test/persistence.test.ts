@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Adapter, AdapterContext, AdapterEvent } from "../src/adapters/Adapter.js";
 import { ConversationStore } from "../src/conversations.js";
+import type { StoreRegistry } from "../src/stores.js";
+
+/** A registry that serves one store for every project (these tests have no projects). */
+const registryOf = (store: ConversationStore) => ({ get: () => store }) as unknown as StoreRegistry;
 import { startServer, type BridgeServer } from "../src/server.js";
 import { connectClient } from "./helpers.js";
 
@@ -19,7 +23,7 @@ async function setup(store: ConversationStore, contexts: AdapterContext[]) {
     token: "t",
     systemPrompt: "",
     snapshotDir: "/s",
-    store,
+    stores: registryOf(store),
     adapterFactory: (ctx) => {
       contexts.push(ctx);
       const adapter: Adapter = {
@@ -97,7 +101,7 @@ describe("conversation persistence", () => {
       token: "t",
       systemPrompt: "",
       snapshotDir: "/s",
-      store,
+      stores: registryOf(store),
       adapterFactory: () => ({
         name: "fake",
         async *send(text: string): AsyncIterable<AdapterEvent> {
@@ -146,7 +150,7 @@ describe("conversation persistence", () => {
       token: "t",
       systemPrompt: "",
       snapshotDir: "/s",
-      store,
+      stores: registryOf(store),
       adapterFactory: () => ({
         name: "fake",
         async *send(): AsyncIterable<AdapterEvent> {
