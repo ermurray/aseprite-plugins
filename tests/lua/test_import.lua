@@ -86,3 +86,15 @@ T.test("a missing source is a plain error and leaves no stray tab", function()
 end)
 
 F.closeAll()
+
+T.test("nearest-color import into a palette with no usable colors explains itself", function()
+  F.closeAll()
+  source()
+  sprites.projectRoot = root
+  local dest = Sprite(4, 3, ColorMode.INDEXED)
+  dest.palettes[1]:resize(1)
+  app.sprite = dest
+  T.eq(call("import_from_sprite", { from = "knight.aseprite", layer = "Head" }).error,
+    "This sprite's palette has no colors to map to. Use paletteMode = add.")
+  sprites.projectRoot = nil
+end)

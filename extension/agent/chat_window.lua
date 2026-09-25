@@ -589,6 +589,24 @@ function ChatWindow:finishSetup(root, adopt)
   self:repaint()
 end
 
+-- First frame of a clip as an Image, loaded once per clip file (paints happen often).
+function ChatWindow:clipPreview(root, c)
+  self.previewCache = self.previewCache or {}
+  local key = root .. "/" .. c.file
+  if self.previewCache[key] == nil then
+    local prev = app.sprite
+    local spr
+    local ok, img = pcall(function()
+      spr = Sprite{ fromFile = app.fs.joinPath(clips.dir(root), c.file) }
+      return Image(spr.cels[1].image)
+    end)
+    if spr then pcall(function() spr:close() end) end
+    if prev then pcall(function() app.sprite = prev end) end
+    self.previewCache[key] = ok and img or false
+  end
+  return self.previewCache[key] or nil
+end
+
 function ChatWindow:showClips()
   local root = self.projectRoot
   if not root then
@@ -596,6 +614,7 @@ function ChatWindow:showClips()
     return
   end
   local filter = ""
+  self.previewCache = {}
   while true do
     local list = clips.list(root, filter)
     local labels, byLabel = {}, {}
@@ -617,13 +636,8 @@ function ChatWindow:showClips()
         onpaint = function(ev)
           local c = byLabel[d.data.clip]
           if not c then return end
-          local ok, frames = pcall(function()
-            local spr = Sprite{ fromFile = app.fs.joinPath(clips.dir(root), c.file) }
-            local img = Image(spr.cels[1].image)
-            spr:close()
-            return img
-          end)
-          if ok and frames then
+          local frames = self:clipPreview(root, c)
+          if frames then
             local scale = math.max(1, math.floor(math.min(160 / frames.width, 120 / frames.height)))
             ev.context:drawImage(frames, Rectangle(0, 0, frames.width, frames.height), Rectangle(0, 0, frames.width * scale, frames.height * scale))
           end

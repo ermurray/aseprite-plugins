@@ -80,3 +80,37 @@ end)
 
 sprites.projectRoot = nil
 F.closeAll()
+
+T.test("preview_export names the absolute folder, the files, and what gets replaced", function()
+  knight()
+  call("export_sprite", { format = "png" })
+  local p = call("preview_export", { format = "png" })
+  T.eq(p.ok, true, p.error)
+  T.eq(p.data.note:find("Writes to " .. app.fs.joinPath(root, "chars"), 1, true) ~= nil, true, p.data.note)
+  T.eq(p.data.note:find("knight.png", 1, true) ~= nil, true)
+  T.eq(p.data.note:find("replaces existing knight.png", 1, true) ~= nil, true, p.data.note)
+end)
+
+T.test("an export never overwrites the sprite's own file", function()
+  F.closeAll()
+  sprites.projectRoot = root
+  local s = Sprite(2, 2)
+  s:saveAs(project.absolute(root, "hero.png"))
+  app.sprite = s
+  local msg = "That would overwrite hero.png itself. Pick another name or destination."
+  T.eq(call("preview_export", { format = "png" }).error, msg)
+  T.eq(call("export_sprite", { format = "png", scale = 4 }).error, msg)
+  local i = Image{ fromFile = project.absolute(root, "hero.png") }
+  T.eq(i.width, 2, "original untouched")
+end)
+
+T.test("includeNormal exports the same frame of the normal map", function()
+  local s = knight()
+  local img = s.layers[1]:cel(2).image:clone(); img:clear(pc.rgba(0, 0, 0, 0)); s.layers[1]:cel(2).image = img
+  T.eq(call("make_normal_map", { layer = "Layer 1", saveHeight = false }).ok, true)
+  app.sprite = s
+  app.frame = s.frames[2]
+  T.eq(call("export_sprite", { format = "png", includeNormal = true }).ok, true)
+  local n = Image{ fromFile = project.absolute(root, "chars/knight_n.png") }
+  T.eq(pc.rgbaA(n:getPixel(1, 1)), 0, "frame 2 of the normal map is empty like frame 2 of the art")
+end)

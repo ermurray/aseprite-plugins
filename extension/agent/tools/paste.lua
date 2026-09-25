@@ -103,6 +103,7 @@ local function convert(dest, img, paletteMode, added)
     return list
   end
   local list = paletteList()
+  if #list == 0 and paletteMode ~= "add" then error("This sprite's palette has no colors to map to. Use paletteMode = add.", 0) end
   for y = 0, img.height - 1 do
     for x = 0, img.width - 1 do
       local v = img:getPixel(x, y)

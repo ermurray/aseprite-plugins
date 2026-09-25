@@ -43,6 +43,14 @@ function M.save_clip(args)
   return { name = entry.name, width = entry.width, height = entry.height, frames = entry.frames, evicted = evicted }
 end
 
+function M.preview_save_clip(args)
+  local root = sprites.projectRoot
+  clips.dir(root)
+  local victim = clips.victim(root, tostring(args.name))
+  if not victim then return { note = "" } end
+  return { note = ("The library is full (max %d): this removes the clip '%s'."):format(require("agent.projectconfig").read(root).clips.max, victim.name) }
+end
+
 function M.insert_clip(args)
   local root = sprites.projectRoot
   clips.dir(root)

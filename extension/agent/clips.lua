@@ -70,54 +70,76 @@ function M.label(c)
   return ("%s%s  %dx%d%s%s"):format(c.name, tags, c.width, c.height, c.frames > 1 and (", " .. c.frames .. " frames") or "", c.pinned and "  (pinned)" or "")
 end
 
-local function fileFor(name) return (name:gsub("[^%w_%-]", "_")) .. ".aseprite" end
+-- A file name for a clip that no other clip uses (names like "a b" and "a_b", or "Hero" and
+-- "hero" on case-insensitive disks, must not share a file).
+local function fileFor(name, list, except)
+  local stem = (name:gsub("[^%w_%-]", "_"))
+  local used = {}
+  for _, c in ipairs(list) do if c ~= except then used[c.file:lower()] = true end end
+  local file, i = stem .. ".aseprite", 2
+  while used[file:lower()] do
+    file = stem .. "_" .. i .. ".aseprite"
+    i = i + 1
+  end
+  return file
+end
+
+-- The clip a save would evict (nil when there's room or the name already exists).
+function M.victim(root, name)
+  local list = load(root)
+  if find(list, name) or #list < projectconfig.read(root).clips.max then return nil end
+  local victim
+  for _, c in ipairs(list) do
+    if not c.pinned and (not victim or c.lastUsedAt < victim.lastUsedAt) then victim = c end
+  end
+  if not victim then
+    error(("All %d clips are pinned and the library is full (max %d). Unpin or delete one first."):format(#list, projectconfig.read(root).clips.max), 0)
+  end
+  return victim
+end
 
 function M.save(root, sprite, opts)
   local list = load(root)
-  local max = projectconfig.read(root).clips.max
   local existing = find(list, opts.name)
   if existing and not opts.replace then
     error("A clip called '" .. opts.name .. "' already exists. Save with replace = true to overwrite it.", 0)
   end
-  local evicted
-  if not existing and #list >= max then
-    local victim
-    for _, c in ipairs(list) do
-      if not c.pinned and (not victim or c.lastUsedAt < victim.lastUsedAt) then victim = c end
-    end
-    if not victim then
-      error(("All %d clips are pinned and the library is full (max %d). Unpin or delete one first."):format(#list, max), 0)
-    end
-    M.delete(root, victim.name)
-    list = load(root)
-    evicted = victim.name
-  end
+  local victim = M.victim(root, opts.name)
+  -- Write the new clip first; only then evict, so a failed save never costs the artist a clip.
   local frames = paste.frameImages(sprite, opts.layer, opts.frames, opts.region, nil)
   local w, h = frames[1].image.width, frames[1].image.height
+  if w < 1 or h < 1 then error("The clip area is empty.", 0) end
+  app.fs.makeAllDirectories(M.dir(root))
+  local file = existing and existing.file or fileFor(opts.name, list)
   local prev = app.sprite
   local clip = Sprite(w, h, ColorMode.RGB)
-  for i = 2, #frames do clip:newEmptyFrame(i) end
-  for i, fr in ipairs(frames) do
-    local cel = clip.layers[1]:cel(i)
-    if cel then cel.image = fr.image else clip:newCel(clip.layers[1], i, fr.image, Point(0, 0)) end
-  end
-  clip.layers[1].name = "Clip"
-  app.fs.makeAllDirectories(M.dir(root))
-  local file = fileFor(opts.name)
-  clip:saveAs(app.fs.joinPath(M.dir(root), file))
-  clip:close()
+  local ok, err = pcall(function()
+    for i = 2, #frames do clip:newEmptyFrame(i) end
+    for i, fr in ipairs(frames) do
+      local cel = clip.layers[1]:cel(i)
+      if cel then cel.image = fr.image else clip:newCel(clip.layers[1], i, fr.image, Point(0, 0)) end
+    end
+    clip.layers[1].name = "Clip"
+    clip:saveAs(app.fs.joinPath(M.dir(root), file))
+  end)
+  pcall(function() clip:close() end)
   if prev then pcall(function() app.sprite = prev end) end
+  if not ok then error(err, 0) end
+  if not app.fs.isFile(app.fs.joinPath(M.dir(root), file)) then error("Couldn't save the clip file.", 0) end
+  local evicted
+  if victim then
+    os.remove(app.fs.joinPath(M.dir(root), victim.file))
+    local _, vi = find(list, victim.name)
+    table.remove(list, vi)
+    evicted = victim.name
+  end
   local t = now()
   local entry = {
     name = opts.name, file = file, tags = opts.tags or {}, source = sprites.name(sprite),
     width = w, height = h, frames = #frames, createdAt = t, lastUsedAt = t, pinned = existing and existing.pinned or false,
   }
-  if existing then
-    local _, i = find(list, opts.name)
-    list[i] = entry
-  else
-    list[#list + 1] = entry
-  end
+  local _, i = find(list, opts.name)
+  if i then list[i] = entry else list[#list + 1] = entry end
   save(root, list)
   return entry, evicted
 end

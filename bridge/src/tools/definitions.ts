@@ -19,6 +19,8 @@ export interface ToolDef {
   forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
   /** Always show the approval card, even with auto-approve on (code execution, Aseprite commands). */
   alwaysAsk?: boolean;
+  /** Extension tool that works out this edit's exact effect (paths, evictions) for the approval card. */
+  preview?: string;
   /** Tools the bridge runs itself (no extension round-trip). */
   runInBridge?(args: Record<string, unknown>, env: { projectRoot: string | null }): Promise<ToolResult>;
 }
@@ -602,6 +604,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "save_clip",
     kind: "edit",
+    preview: "preview_save_clip",
     description: "Save part of a sprite as a reusable clip in the project (selection, or region, or the whole canvas; one layer or flattened; one frame or a range). The library keeps the most recently used clips (default 20); pinned clips are never evicted.",
     shape: {
       sprite: spriteArg,
@@ -651,6 +654,7 @@ export const TOOL_DEFS: ToolDef[] = [
     name: "export_sprite",
     kind: "edit",
     alwaysAsk: true,
+    preview: "preview_export",
     description:
       "Export for games or sharing: png (one frame), frames (one PNG per frame), gif, or sheet (sprite sheet + Aseprite JSON, which Godot/Unity/most engines can import). Optional tag, layer, scale 1-10, sheetType, data hash/array/none, includeNormal (also export the <name>_normal companion as _n). Goes where the project's export settings say (next to the sprite by default) unless destination (a folder) is given.",
     shape: {

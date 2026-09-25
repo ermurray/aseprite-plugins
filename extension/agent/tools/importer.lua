@@ -39,7 +39,6 @@ function M.import_from_sprite(args)
     return { sprite = sprites.name(dest), layer = layer.name, frames = #frames, colorsAdded = info.colorsAdded }
   end)
   if handle and handle.close then handle.close() end
-  if app.sprite ~= dest then pcall(function() app.sprite = dest end) end
   if not ok then error(result, 0) end
   return result
 end

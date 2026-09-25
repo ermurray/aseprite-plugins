@@ -96,3 +96,29 @@ T.test("delete, rename, clear and the UI label", function()
 end)
 
 F.closeAll()
+
+T.test("clip names that look alike get separate files", function()
+  art()
+  clips.clear(root, true)
+  setMax(20)
+  call("save_clip", { name = "a b", region = { x = 0, y = 0, w = 1, h = 1 } })
+  call("save_clip", { name = "a_b", region = { x = 1, y = 0, w = 1, h = 1 } })
+  local files = {}
+  for _, c in ipairs(clips.list(root)) do files[#files + 1] = c.file:lower() end
+  T.eq(files[1] ~= files[2], true)
+  local dest = app.sprite
+  call("insert_clip", { name = "a b", at = { x = 0, y = 2 } })
+  T.eq(F.px(dest, 0, 2, "Clip: a b"), pc.rgba(255, 0, 0, 255))
+end)
+
+T.test("a failed save never evicts a clip, and the preview names the one that would go", function()
+  art()
+  clips.clear(root, true)
+  setMax(1)
+  call("save_clip", { name = "keep" })
+  T.eq(call("preview_save_clip", { name = "next" }).data.note, "The library is full (max 1): this removes the clip 'keep'.")
+  T.eq(call("save_clip", { name = "broken", layer = "Nope" }).ok, false)
+  T.eq(#clips.list(root), 1)
+  T.eq(clips.list(root)[1].name, "keep")
+  T.eq(#app.sprites, 1, "no temporary clip sprite left open")
+end)

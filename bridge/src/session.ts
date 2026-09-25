@@ -61,7 +61,16 @@ export class Session {
           const rejection = this.checkDraftLock(def, args);
           if (rejection) return { ok: false, error: rejection };
           if (!this.autoApprove || def.alwaysAsk) {
-            const approved = await this.askApproval(this.summaryFor(def, args), args.sprite);
+            let summary = this.summaryFor(def, args);
+            if (def.preview) {
+              // Ask Aseprite for the exact plan (final paths, what gets replaced or evicted) so the card is honest.
+              const plan = await this.broker.call(def.preview, args);
+              if (stale()) return { ok: false, error: "Chat reset" };
+              if (!plan.ok) return plan;
+              const note = (plan.data as { note?: unknown } | undefined)?.note;
+              if (typeof note === "string" && note) summary += `\n${note}`;
+            }
+            const approved = await this.askApproval(summary, args.sprite);
             if (stale()) return { ok: false, error: "Chat reset" };
             if (!approved) return { ok: false, error: "The artist declined this change. Ask what they would prefer instead." };
           }

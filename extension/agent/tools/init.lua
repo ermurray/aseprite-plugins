@@ -30,6 +30,8 @@ registry.register({
   get_tool_state = toolstate.get_tool_state,
   list_installed_extensions = extensions.list_installed_extensions,
   list_clips = cliptools.list_clips,
+  preview_export = export.preview_export,
+  preview_save_clip = cliptools.preview_save_clip,
 }, "read")
 
 registry.register({

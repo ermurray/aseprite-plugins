@@ -126,6 +126,34 @@ describe("approval gate", () => {
     await c.waitFor((m) => m.type === "turn_done");
   });
 
+  it("tools with a preview get the extension's exact plan on their card, and preview errors stop before the card", async () => {
+    server = await startServer({
+      port: 0, token: TOKEN, systemPrompt: "", snapshotDir: "/s",
+      adapterFactory: scriptedAdapterFactory(async function* (ctx) {
+        rec.push(await ctx.tools.call("export_sprite", { format: "png" }));
+        rec.push(await ctx.tools.call("export_sprite", { format: "gif" }));
+      }),
+    });
+    const rec = recorder();
+    const c = await connectClient(server.port);
+    c.ws.on("message", (raw) => {
+      const m = JSON.parse(raw.toString()) as BridgeMessage;
+      if (m.type !== "tool_call") return;
+      if (m.name === "preview_export") {
+        const ok = (m.args as any).format === "png";
+        c.send({ type: "tool_result", callId: m.callId, ok, ...(ok ? { data: { note: "Writes to /art/chars: knight.png" } } : { error: "That would overwrite the sprite's own file." }) });
+      } else c.send({ type: "tool_result", callId: m.callId, ok: true, data: {} });
+    });
+    c.send({ type: "hello", token: TOKEN, extensionVersion: "t" });
+    await c.waitFor((m) => m.type === "ready");
+    c.send({ type: "user_message", text: "export" });
+    const req = await approveNext(c, true);
+    expect((req as any).summary).toContain("\nWrites to /art/chars: knight.png");
+    await c.waitFor((m) => m.type === "turn_done");
+    expect(rec.results[1]).toEqual({ ok: false, error: "That would overwrite the sprite's own file." });
+    expect(c.received.filter((m) => m.type === "approval_request")).toHaveLength(1);
+  });
+
   it("cancel resolves a pending approval as declined", async () => {
     const rec = recorder();
     const c = await setup(async function* (ctx) {
