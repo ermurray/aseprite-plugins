@@ -4,6 +4,14 @@ local pc = app.pixelColor
 F.tmp = app.fs.joinPath(app.fs.tempPath, "aseagent-tests")
 app.fs.makeAllDirectories(F.tmp)
 
+-- A folder name no earlier test run has used (os.time() alone collides between quick runs).
+local runId = tostring(os.time()) .. "-" .. tostring(math.floor(os.clock() * 1e6)) .. "-" .. tostring(math.random(1e9))
+local counter = 0
+function F.unique(prefix)
+  counter = counter + 1
+  return app.fs.joinPath(F.tmp, prefix .. " " .. runId .. "-" .. counter)
+end
+
 function F.closeAll()
   while #app.sprites > 0 do app.sprites[1]:close() end
 end

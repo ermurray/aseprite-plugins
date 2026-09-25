@@ -57,7 +57,7 @@ T.test("every tool name the bridge forwards has a Lua handler", function()
   local registry = require("agent.tools")
   for _, name in ipairs{ "get_sprite_info", "get_snapshot", "get_pixels", "get_palette", "list_open_sprites",
     "analyze_colors", "set_palette", "add_palette_colors", "replace_color", "layer_ops", "frame_ops",
-    "set_pixels", "annotate", "transform", "ensure_draft_layer", "list_project_sprites" } do
+    "set_pixels", "annotate", "transform", "ensure_draft_layer", "list_project_sprites", "get_tool_state", "set_tool", "list_installed_extensions", "run_extension_command", "check_readability", "light_preview", "dither", "gradient_fill", "pixel_perfect", "snap_to_palette", "selout", "layer_style", "builtin_fx", "make_normal_map", "write_script", "run_script" } do
     T.eq(type(registry.handlers[name]), "function", name)
   end
 end)

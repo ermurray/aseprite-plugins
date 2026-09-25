@@ -7,10 +7,10 @@ describe("tool definitions", () => {
     const names = TOOL_DEFS.map((d) => d.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names.sort()).toEqual([
-      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "create_draft_layer", "frame_ops", "get_palette",
+      "add_color_ramp", "add_palette_colors", "analyze_colors", "annotate", "builtin_fx", "check_readability", "create_draft_layer", "dither", "find_extensions", "frame_ops", "get_tool_state", "gradient_fill", "layer_style", "light_preview", "list_installed_extensions", "make_normal_map", "pixel_perfect", "run_extension_command", "run_script", "selout", "set_tool", "snap_to_palette", "write_script", "get_palette",
       "get_pixels", "get_snapshot", "get_sprite_info", "layer_ops", "list_open_sprites", "list_project_sprites", "propose_brief_change", "propose_memory", "replace_color",
       "set_palette", "set_pixels", "transform",
-    ]);
+    ].sort());
   });
 
   it("gives every edit tool an approval summary, and read tools none", () => {
@@ -69,5 +69,32 @@ describe("tool definitions", () => {
     expect(toolDef("get_sprite_info")!.activity({})).toBe("Inspected the active sprite");
     expect(toolDef("get_pixels")!.activity({ region: { x: 2, y: 3, w: 4, h: 5 } })).toBe("Read 4x5 pixels at (2,3) in the active sprite");
     for (const d of TOOL_DEFS) expect(d.activity({})).toMatch(/^[\x20-\x7E]+$/);
+  });
+  it("set_tool is a setting (no approval) and scripts show their full code on the card", () => {
+    expect(toolDef("set_tool")!.kind).toBe("setting");
+    const card = toolDef("write_script")!.summarize!({ name: "Export tags", description: "Exports each tag", code: "print('hi')\nprint('there')" });
+    expect(card).toContain('Save script "Export tags" to File > Scripts > Agent');
+    expect(card).toContain("print('hi')\nprint('there')");
+    expect(toolDef("run_script")!.summarize!({ name: "Export tags" })).toBe('Run script "Export tags" once');
+  });
+
+  it("validates FX arguments", () => {
+    const dither = z.object(toolDef("dither")!.shape);
+    expect(dither.safeParse({ layer: "Body", colorA: "#000000", colorB: "#ffffff", amount: 0.5 }).success).toBe(true);
+    expect(dither.safeParse({ layer: "Body", colorA: "#000000", colorB: "#ffffff", amount: 2 }).success).toBe(false);
+    const script = z.object(toolDef("write_script")!.shape);
+    expect(script.safeParse({ name: "../evil", description: "x", code: "x" }).success).toBe(false);
+    const cmd = z.object(toolDef("run_extension_command")!.shape);
+    expect(cmd.safeParse({ command: "os.exit()" }).success).toBe(false);
+  });
+
+  it("script code and descriptions can't hide control characters, and replacing is explicit", () => {
+    const script = z.object(toolDef("write_script")!.shape);
+    expect(script.safeParse({ name: "a", description: "ok", code: "-- tidy\ros.execute('x')" }).success).toBe(false);
+    expect(script.safeParse({ name: "a", description: "bad\rdesc", code: "x" }).success).toBe(false);
+    expect(script.safeParse({ name: "a", description: "ok", code: "local t = 1\n\tprint(t)\n" }).success).toBe(true);
+    for (const n of ["write_script", "run_script", "run_extension_command"]) expect(toolDef(n)!.alwaysAsk).toBe(true);
+    expect(toolDef("write_script")!.summarize!({ name: "a", description: "d", code: "x", replace: true })).toContain("Replace the script");
+    expect(toolDef("run_extension_command")!.summarize!({ command: "Foo" })).toBe('Run the Aseprite command "Foo" (not undoable as one step)');
   });
 });

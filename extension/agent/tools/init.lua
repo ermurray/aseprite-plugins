@@ -7,6 +7,12 @@ local frames = require("agent.tools.frames")
 local annotate = require("agent.tools.annotate")
 local transform = require("agent.tools.transform")
 local analyze = require("agent.tools.analyze")
+local fx = require("agent.tools.fx")
+local maps = require("agent.tools.maps")
+local builtin = require("agent.tools.builtin")
+local toolstate = require("agent.tools.toolstate")
+local extensions = require("agent.tools.extensions")
+local scripts = require("agent.tools.scripts")
 
 registry.register({
   get_sprite_info = inspect.get_sprite_info,
@@ -16,6 +22,10 @@ registry.register({
   analyze_colors = analyze.analyze_colors,
   list_open_sprites = analyze.list_open_sprites,
   list_project_sprites = analyze.list_project_sprites,
+  check_readability = maps.check_readability,
+  light_preview = maps.light_preview,
+  get_tool_state = toolstate.get_tool_state,
+  list_installed_extensions = extensions.list_installed_extensions,
 }, "read")
 
 registry.register({
@@ -28,6 +38,19 @@ registry.register({
   frame_ops = frames.frame_ops,
   annotate = annotate.annotate,
   transform = transform.transform,
+  dither = fx.dither,
+  gradient_fill = fx.gradient_fill,
+  pixel_perfect = fx.pixel_perfect,
+  snap_to_palette = fx.snap_to_palette,
+  selout = fx.selout,
+  layer_style = fx.layer_style,
+  make_normal_map = maps.make_normal_map,
+  builtin_fx = builtin.builtin_fx,
+  run_extension_command = extensions.run_extension_command,
+  write_script = scripts.write_script,
+  run_script = scripts.run_script,
 }, "edit")
+
+registry.register({ set_tool = toolstate.set_tool }, "setting")
 
 return registry

@@ -4,7 +4,7 @@ local tools = require("agent.tools")
 local sprites = require("agent.tools.sprites")
 local project = require("agent.project")
 
-local root = app.fs.joinPath(F.tmp, "open tests " .. os.time())
+local root = F.unique("open tests ")
 app.fs.makeAllDirectories(app.fs.joinPath(root, "chars"))
 project.create(root, {})
 

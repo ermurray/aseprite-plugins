@@ -2,7 +2,7 @@ local T = require("testlib")
 local F = require("fixtures")
 local project = require("agent.project")
 
-local base = app.fs.joinPath(F.tmp, "proj tests " .. os.time())
+local base = F.unique("proj tests ")
 local game = app.fs.joinPath(base, "My Gäme")
 app.fs.makeAllDirectories(app.fs.joinPath(game, "chars", "enemies"))
 app.fs.makeAllDirectories(app.fs.joinPath(game, ".hidden"))

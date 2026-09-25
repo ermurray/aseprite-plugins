@@ -3,12 +3,13 @@ package.path = app.fs.joinPath(root, "extension", "?.lua") .. ";"
   .. app.fs.joinPath(root, "extension", "?", "init.lua") .. ";"
   .. app.fs.joinPath(root, "tests", "lua", "?.lua") .. ";" .. package.path
 
+math.randomseed(os.time() + math.floor(os.clock() * 1e6))
 local T = require("testlib")
 local only = app.params.only or ""
 local suites = {
   "test_chat_model", "test_chat_render", "test_tools_inspect", "test_connection",
   "test_edit", "test_pixels", "test_palette", "test_layers_frames", "test_geometry",
-  "test_annotate_transform", "test_analyze", "test_chat_window", "test_project", "test_prefs_context", "test_open_sprites", "test_palettes",
+  "test_annotate_transform", "test_analyze", "test_chat_window", "test_project", "test_prefs_context", "test_open_sprites", "test_palettes", "test_fx_math", "test_fx", "test_maps", "test_builtin_toolstate", "test_scripts",
 }
 
 for _, name in ipairs(suites) do

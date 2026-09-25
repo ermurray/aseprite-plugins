@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { DRAFT_LAYER, NOTES_LAYER } from "./constants.js";
 import { colorRamp } from "./ramp.js";
+import { searchCatalog } from "../catalog.js";
 import { appendMemory, changeBrief, describeBriefChange, type BriefField } from "../project.js";
 import type { ToolResult } from "../toolTypes.js";
 
-export type ToolKind = "read" | "edit";
+export type ToolKind = "read" | "edit" | "setting";
 
 export interface ToolDef {
   name: string;
@@ -16,6 +17,8 @@ export interface ToolDef {
   summarize?(args: Record<string, unknown>): string;
   /** The tool name and args actually sent to the extension. Defaults to this tool's own. */
   forward?(args: Record<string, unknown>): { name: string; args: Record<string, unknown> };
+  /** Always show the approval card, even with auto-approve on (code execution, Aseprite commands). */
+  alwaysAsk?: boolean;
   /** Tools the bridge runs itself (no extension round-trip). */
   runInBridge?(args: Record<string, unknown>, env: { projectRoot: string | null }): Promise<ToolResult>;
 }
@@ -39,6 +42,13 @@ const target = (a: Record<string, unknown>) => (typeof a.layer === "string" ? `$
 const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const frameRange = z.object({ from: z.number().int().min(1), to: z.number().int().min(1) });
+const layerArg2 = z.string().describe("Layer to work on.");
+const allFramesArg = z.boolean().optional().describe("Apply to every frame (default: the given or active frame only).");
+const regionArg = rect().optional().describe("Limit to this rectangle (default: the selection if any, else the whole canvas).");
+const fxTarget = { sprite: spriteArg, layer: layerArg2, frame: frameArg, allFrames: allFramesArg, region: regionArg };
+// Tab and newline are fine in code; any other control character could hide code from the card.
+const noHiddenChars = (s: string) => !/[\u0000-\u0008\u000b\u000c\u000d\u000e-\u001f\u007f]/.test(s);
+const where = (a: Record<string, unknown>) => `${target(a)}${a.allFrames ? ", all frames" : typeof a.frame === "number" ? `, frame ${a.frame}` : ""}`;
 
 export const TOOL_DEFS: ToolDef[] = [
   {
@@ -351,6 +361,216 @@ export const TOOL_DEFS: ToolDef[] = [
       await changeBrief(env.projectRoot, a.field as BriefField, String(a.value));
       return { ok: true, data: { updated: a.field } };
     },
+  },
+  {
+    name: "get_tool_state",
+    kind: "read",
+    description: "The artist's current tool, brush (size, shape, angle), ink, foreground/background colors, and the active sprite's symmetry and tiled mode.",
+    shape: {},
+    activity: () => "Checked your current tool",
+  },
+  {
+    name: "set_tool",
+    kind: "setting",
+    description:
+      "Set up Aseprite's tools for the artist immediately (no approval; it changes settings, not art): tool id (pencil, eraser, paint_bucket, spray, line, rectangle, filled_rectangle, ellipse, filled_ellipse, contour, polygon, blur, jumble, eyedropper, move, rectangular_marquee, lasso, magic_wand), brush size/shape/angle, ink (simple, alpha_compositing, copy_color, lock_alpha, shading), foreground/background colors, symmetry and tiled mode. Say what you set and why.",
+    shape: {
+      tool: z.string().regex(/^[a-z_]+$/).optional(),
+      brushSize: z.number().int().min(1).max(64).optional(),
+      brushShape: z.enum(["circle", "square", "line"]).optional(),
+      brushAngle: z.number().int().min(-180).max(180).optional(),
+      ink: z.enum(["simple", "alpha_compositing", "copy_color", "lock_alpha", "shading"]).optional(),
+      foreground: hexColor.optional(),
+      background: hexColor.optional(),
+      symmetry: z.enum(["none", "horizontal", "vertical", "both"]).optional(),
+      tiled: z.enum(["none", "x", "y", "both"]).optional(),
+    },
+    activity: (a) => `Set up ${[a.tool, a.ink && `${a.ink} ink`, a.brushSize && `brush ${a.brushSize}px`].filter(Boolean).join(", ") || "your tools"}`,
+  },
+  {
+    name: "find_extensions",
+    kind: "read",
+    description: "Search a curated catalog of well-known Aseprite extensions and script collections (name, purpose, link, license) to recommend. Empty query lists all. Nothing is installed automatically.",
+    shape: { query: z.string().optional() },
+    activity: (a) => `Searched extensions${typeof a.query === "string" && a.query ? ` for "${a.query}"` : ""}`,
+    runInBridge: async (a) => ({ ok: true, data: { matches: searchCatalog(typeof a.query === "string" ? a.query : "") } }),
+  },
+  {
+    name: "list_installed_extensions",
+    kind: "read",
+    description: "Extensions the artist has installed in Aseprite (name, display name, version, description).",
+    shape: {},
+    activity: () => "Listed your installed extensions",
+  },
+  {
+    name: "check_readability",
+    kind: "read",
+    description: "Read-only teaching view of a frame: 'values' (grayscale by luminance), 'silhouette' (flat shape), or 'both' side by side. Returns an image; the sprite is not changed.",
+    shape: { sprite: spriteArg, frame: frameArg, mode: z.enum(["values", "silhouette", "both"]).optional() },
+    activity: (a) => `Checked ${a.mode ?? "values and silhouette"} of ${spriteName(a)}`,
+  },
+  {
+    name: "light_preview",
+    kind: "read",
+    description: "Read-only lit preview: shades a frame using normals computed from a layer (or the flattened image) with a light direction (lightX right, lightY up, lightZ toward the viewer). Use it to show how normal maps or shading read. The sprite is not changed.",
+    shape: {
+      sprite: spriteArg,
+      layer: z.string().optional(),
+      frame: frameArg,
+      lightX: z.number().min(-1).max(1),
+      lightY: z.number().min(-1).max(1),
+      lightZ: z.number().min(0).max(1).optional(),
+      ambient: z.number().min(0).max(1).optional(),
+      source: z.enum(["brightness", "edges", "both"]).optional(),
+      bevel: z.number().int().min(1).max(16).optional(),
+      strength: z.number().min(0.5).max(8).optional(),
+    },
+    activity: (a) => `Previewed lighting on ${spriteName(a)}`,
+  },
+  {
+    name: "dither",
+    kind: "edit",
+    description: "Dither two colors across the target: amount is the share of colorB (0-1); pattern bayer2, bayer4 (default) or checker. By default only paints over existing opaque pixels (onlyOpaque).",
+    shape: { ...fxTarget, colorA: hexColor, colorB: hexColor, amount: z.number().min(0).max(1), pattern: z.enum(["bayer2", "bayer4", "checker"]).optional(), onlyOpaque: z.boolean().optional() },
+    activity: (a) => `Dithered ${where(a)}`,
+    summarize: (a) => `Dither ${a.colorA} and ${a.colorB} (${Math.round(Number(a.amount) * 100)}% ${a.colorB}, ${a.pattern ?? "bayer4"}) on ${where(a)}`,
+  },
+  {
+    name: "gradient_fill",
+    kind: "edit",
+    description: "Fill the target with a gradient through 2-8 colors: linear (angle in degrees, 0 = left to right) or radial (from the center); optional dither between steps. Fills transparent pixels too unless onlyOpaque.",
+    shape: {
+      ...fxTarget,
+      colors: z.array(hexColor).min(2).max(8),
+      type: z.enum(["linear", "radial"]).optional(),
+      angle: z.number().min(-360).max(360).optional(),
+      dither: z.enum(["none", "bayer2", "bayer4", "checker"]).optional(),
+      onlyOpaque: z.boolean().optional(),
+    },
+    activity: (a) => `Filled a gradient on ${where(a)}`,
+    summarize: (a) => `Fill a ${a.type ?? "linear"} gradient ${(Array.isArray(a.colors) ? a.colors : []).join(" > ")}${a.dither && a.dither !== "none" ? ` with ${a.dither} dither` : ""} on ${where(a)}`,
+  },
+  {
+    name: "pixel_perfect",
+    kind: "edit",
+    description: "Clean 1px lines: remove L-shaped corner pixels so strokes become clean diagonals (keeps line connectivity; leaves junctions and filled areas alone).",
+    shape: fxTarget,
+    activity: (a) => `Cleaned lines on ${where(a)}`,
+    summarize: (a) => `Clean up 1px lines (pixel-perfect) on ${where(a)}`,
+  },
+  {
+    name: "snap_to_palette",
+    kind: "edit",
+    description: "Recolor every off-palette pixel to the nearest palette color: palette 'project' (the project's palette.gpl, default) or 'sprite' (the sprite's palette). Layer optional: default all editable layers.",
+    shape: { sprite: spriteArg, layer: z.string().optional(), frame: frameArg, allFrames: allFramesArg, palette: z.enum(["project", "sprite"]).optional() },
+    activity: (a) => `Snapped ${spriteName(a)} to the ${a.palette ?? "project"} palette`,
+    summarize: (a) => `Snap off-palette colors in ${where(a)} to the ${a.palette ?? "project"} palette`,
+  },
+  {
+    name: "selout",
+    kind: "edit",
+    description: "Selective outline: recolor outline pixels (default: the most common edge color, or outlineColor) to a darker shade of the fill next to them. darken 0-0.9 (default 0.35).",
+    shape: { ...fxTarget, darken: z.number().min(0).max(0.9).optional(), outlineColor: hexColor.optional() },
+    activity: (a) => `Applied selout to ${where(a)}`,
+    summarize: (a) => `Selective outline on ${where(a)} (darken ${a.darken ?? 0.35})`,
+  },
+  {
+    name: "layer_style",
+    kind: "edit",
+    description: "Layer effects: 'overlay' tints the layer's pixels toward color by amount; 'stroke' adds an N-px outline on a new '<layer> stroke' layer below; 'shadow' adds a hard drop shadow on a new '<layer> shadow' layer below.",
+    shape: {
+      ...fxTarget,
+      style: z.enum(["overlay", "stroke", "shadow"]),
+      color: hexColor,
+      amount: z.number().min(0).max(1).optional(),
+      width: z.number().int().min(1).max(8).optional(),
+      offsetX: z.number().int().min(-16).max(16).optional(),
+      offsetY: z.number().int().min(-16).max(16).optional(),
+    },
+    activity: (a) => `Added a ${a.style} to ${where(a)}`,
+    summarize: (a) =>
+      a.style === "overlay"
+        ? `Tint ${where(a)} toward ${a.color} (${Math.round(Number(a.amount ?? 0.5) * 100)}%)`
+        : a.style === "stroke"
+          ? `Add a ${a.width ?? 1}px ${a.color} stroke under ${where(a)} (new layer)`
+          : `Add a ${a.color} drop shadow offset (${a.offsetX ?? 1},${a.offsetY ?? 1}) under ${where(a)} (new layer)`,
+  },
+  {
+    name: "builtin_fx",
+    kind: "edit",
+    description:
+      "Aseprite's own adjustments on a layer/frame (optionally a region): brightness_contrast (brightness, contrast -100..100), hue_saturation (hue -180..180, saturation, lightness -100..100), invert, despeckle (size 3-9), blur (size 3/5/7/9), sharpen (size 3/5/7), find_edges, replace_color (from, to, tolerance).",
+    shape: {
+      sprite: spriteArg,
+      layer: layerArg2,
+      frame: frameArg,
+      region: regionArg,
+      effect: z.enum(["brightness_contrast", "hue_saturation", "invert", "despeckle", "blur", "sharpen", "find_edges", "replace_color"]),
+      brightness: z.number().min(-100).max(100).optional(),
+      contrast: z.number().min(-100).max(100).optional(),
+      hue: z.number().min(-180).max(180).optional(),
+      saturation: z.number().min(-100).max(100).optional(),
+      lightness: z.number().min(-100).max(100).optional(),
+      size: z.number().int().min(3).max(9).optional(),
+      from: hexColor.optional(),
+      to: hexColor.optional(),
+      tolerance: z.number().int().min(0).max(255).optional(),
+    },
+    activity: (a) => `Applied ${String(a.effect).replace(/_/g, " ")} to ${target(a)}`,
+    summarize: (a) => `Apply Aseprite's ${String(a.effect).replace(/_/g, " ")} to ${target(a)}${typeof a.frame === "number" ? `, frame ${a.frame}` : ""}${a.region ? " (region only)" : ""}`,
+  },
+  {
+    name: "make_normal_map",
+    kind: "edit",
+    description:
+      "Make a height map and normal map from a layer for 2D lighting, every frame, saved as companion sprites next to the source (<name>_height.aseprite, <name>_normal.aseprite). source: brightness (lighter = higher), edges (pillow bevel from the shape's edge), both (default). convention: opengl (+Y, Godot/Unity default) or directx. quantize: off, 3 or 5 levels per axis for crisp pixel-art normals.",
+    shape: {
+      sprite: spriteArg,
+      layer: layerArg2,
+      source: z.enum(["brightness", "edges", "both"]).optional(),
+      bevel: z.number().int().min(1).max(16).optional(),
+      strength: z.number().min(0.5).max(8).optional(),
+      convention: z.enum(["opengl", "directx"]).optional(),
+      quantize: z.enum(["off", "3", "5"]).optional(),
+      saveHeight: z.boolean().optional(),
+    },
+    activity: (a) => `Made normal maps for ${target(a)}`,
+    summarize: (a) =>
+      `Create or replace ${spriteName(a)}'s companion normal map${a.saveHeight === false ? "" : " and height map"} from ${target(a)} (${a.source ?? "both"}, ${a.convention ?? "opengl"}), saved next to it`,
+  },
+  {
+    name: "run_extension_command",
+    kind: "edit",
+    alwaysAsk: true,
+    description: "Run an Aseprite command by id, e.g. one added by an installed extension (its author names it). Some built-in commands (quit, save, close, options, scripts) are refused. Check list_installed_extensions first.",
+    shape: { command: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/) },
+    activity: (a) => `Ran the ${a.command} command`,
+    summarize: (a) => `Run the Aseprite command "${a.command}" (not undoable as one step)`,
+  },
+  {
+    name: "write_script",
+    kind: "edit",
+    alwaysAsk: true,
+    description:
+      "Save a Lua script for a repetitive job to the artist's File > Scripts > Agent menu. The artist sees the full code on the approval card. Keep it short and commented; wrap sprite edits in app.transaction. Run it with run_script (separate approval).",
+    shape: {
+      name: z.string().regex(/^[A-Za-z0-9 _-]{1,60}$/),
+      description: z.string().min(1).max(200).refine(noHiddenChars, "no control characters"),
+      code: z.string().min(1).max(20000).refine(noHiddenChars, "no control characters other than tab and newline"),
+      replace: z.boolean().optional().describe("Set true to overwrite an existing script with this name."),
+    },
+    activity: (a) => `Saved the script "${a.name}"`,
+    summarize: (a) =>
+      `${a.replace ? `Replace the script "${a.name}" in` : `Save script "${a.name}" to`} File > Scripts > Agent: ${a.description}\n\n${a.code}`,
+  },
+  {
+    name: "run_script",
+    kind: "edit",
+    alwaysAsk: true,
+    description: "Run a script saved in File > Scripts > Agent once. Edits run as one undo step; printed output and errors come back to you.",
+    shape: { name: z.string().regex(/^[A-Za-z0-9 _-]{1,60}$/) },
+    activity: (a) => `Ran the script "${a.name}"`,
+    summarize: (a) => `Run script "${a.name}" once`,
   },
 ];
 
