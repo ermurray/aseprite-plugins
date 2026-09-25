@@ -105,6 +105,16 @@ describe("approval gate", () => {
     expect(c.received.filter((m) => m.type === "tool_call")).toHaveLength(1);
   });
 
+  it("setting tools never show a card", async () => {
+    const c = await setup(async function* (ctx) {
+      await ctx.tools.call("set_tool", { tool: "pencil", brushSize: 2 });
+    });
+    c.send({ type: "user_message", text: "set me up" });
+    await c.waitFor((m) => m.type === "turn_done");
+    expect(c.received.some((m) => m.type === "approval_request")).toBe(false);
+    expect(c.received.filter((m) => m.type === "tool_call")).toHaveLength(1);
+  });
+
   it("cancel resolves a pending approval as declined", async () => {
     const rec = recorder();
     const c = await setup(async function* (ctx) {
