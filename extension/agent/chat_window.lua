@@ -125,6 +125,10 @@ function ChatWindow:build()
     hexpand = true,
     vexpand = true,
     onpaint = function(ev) self:paint(ev.context) end,
+    onmousedown = function()
+      self.inputFocused = false -- clicking the transcript takes keyboard focus away from the input box
+      self:repaint()
+    end,
     onwheel = function(ev) self:scrollBy(ev.deltaY * 3 * self.lineH) end,
   }
   dlg:newrow()
@@ -163,7 +167,9 @@ function ChatWindow:build()
       self:repaint()
     end,
     onwheel = function(ev)
-      self.input.scroll = math.max(0, self.input.scroll + ev.deltaY * self.inputLineH)
+      if self.input.lines then
+        self.input:scrollBy(ev.deltaY * self.inputLineH, self.input.lines, self.inputLineH, self.inputViewH or 60)
+      end
       self:repaint()
     end,
   }
@@ -791,6 +797,8 @@ function ChatWindow:onInputKey(ev)
   local r = self.input:handleKey(ev, function()
     local ok, text = pcall(function() return app.clipboard.hasText and app.clipboard.text or nil end)
     return ok and text or nil
+  end, nil, function(text)
+    pcall(function() app.clipboard.text = text end)
   end)
   if r then
     self.inputFocused = true
@@ -803,30 +811,46 @@ end
 function ChatWindow:paintInput(gc)
   local lh = gc:measureText("Ag").height + 3
   self.inputLineH = lh
+  self.inputViewH = gc.height - 2 * PAD
   local measure = function(s) return gc:measureText(s).width end
-  self.input.measure = measure
-  local lines = self.input:layout(gc.width - 2 * PAD, measure)
-  self.input:ensureVisible(lines, lh, gc.height - 2 * PAD, measure)
+  local input = self.input
+  input.measure = measure
+  local lines = input:layout(gc.width - 2 * PAD, measure)
+  if input.followCursor then
+    input:ensureVisible(lines, lh, self.inputViewH)
+    input.followCursor = false
+  end
 
   gc.color = themeColor("window_face", Color{ r = 40, g = 40, b = 48 })
   gc:fillRect(Rectangle(0, 0, gc.width, gc.height))
   gc.color = self.inputFocused and COLORS.agent_label or Color{ r = 110, g = 110, b = 120 }
   gc:strokeRect(Rectangle(0, 0, gc.width, gc.height))
 
-  if self.input.text == "" then
+  local textColor = themeColor("text", Color{ r = 230, g = 230, b = 230 })
+  if input.text == "" then
     gc.color = COLORS.activity
-    gc:fillText(PLACEHOLDER, PAD, PAD)
+    for i, l in ipairs(render.wrap(PLACEHOLDER, gc.width - 2 * PAD, measure)) do
+      gc:fillText(l, PAD, PAD + (i - 1) * lh)
+    end
   else
-    gc.color = themeColor("text", Color{ r = 230, g = 230, b = 230 })
     for i, l in ipairs(lines) do
-      local y = PAD + (i - 1) * lh - self.input.scroll
-      if y > -lh and y < gc.height then gc:fillText(l.text, PAD, y) end
+      local y = PAD + (i - 1) * lh - input.scroll
+      if y > -lh and y < gc.height then
+        if input.selectAll then
+          local w = 0
+          for _, cw in ipairs(l.widths) do w = w + cw end
+          gc.color = Color{ r = 70, g = 110, b = 170 }
+          gc:fillRect(Rectangle(PAD, y, math.max(w, 3), lh - 1))
+        end
+        gc.color = textColor
+        gc:fillText(render.displayText(l.text, true), PAD, y)
+      end
     end
   end
-  if self.inputFocused then
-    local idx, x = self.input:caret(lines, measure)
-    local y = PAD + (idx - 1) * lh - self.input.scroll
-    gc.color = themeColor("text", Color{ r = 230, g = 230, b = 230 })
+  if self.inputFocused and not input.selectAll then
+    local idx, x = input:caret(lines)
+    local y = PAD + (idx - 1) * lh - input.scroll
+    gc.color = textColor
     gc:fillRect(Rectangle(PAD + x, y, 1, lh - 3))
   end
 end
