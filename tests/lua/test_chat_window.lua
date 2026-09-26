@@ -93,7 +93,8 @@ T.test("sending a message attaches the context and the attach flag, then clears 
   local w = stubbed({})
   w.conn.status = "connected"
   w.attachNext = true
-  w.dlg = { data = { input = "what do you think?" }, modify = function() end, repaint = function() end }
+  w.dlg = { data = {}, modify = function() end, repaint = function() end }
+  w.input:setText("what do you think?")
   app.sprite = Sprite(2, 2)
   w:onSendOrStop()
   local msg = w.sent[#w.sent]
@@ -225,4 +226,29 @@ T.test("startBridge throttles by wall time, says so, and never leaves two timers
   T.eq(first.isRunning, false, "the older poll timer is stopped")
   w.startTimer:stop()
   launcher.start, ChatWindow.now = realStart, realNow
+end)
+
+T.test("Enter in the input box sends and clears it; Shift+Enter keeps typing", function()
+  F.closeAll()
+  local w = stubbed({})
+  w.conn.status = "connected"
+  w.dlg = { data = {}, modify = function() end, repaint = function() end }
+  local stopped = 0
+  local function ev(code, key, mods)
+    local e = { code = code, key = key or "", stopPropagation = function() stopped = stopped + 1 end }
+    for k, v in pairs(mods or {}) do e[k] = v end
+    return e
+  end
+  w:onInputKey(ev("Key", "h"))
+  w:onInputKey(ev("Key", "i"))
+  w:onInputKey(ev("Enter", "", { shiftKey = true }))
+  w:onInputKey(ev("Key", "x"))
+  T.eq(w.input.text, "hi\nx")
+  w:onInputKey(ev("Enter"))
+  T.eq(w.sent[#w.sent].type, "user_message")
+  T.eq(w.sent[#w.sent].text, "hi\nx")
+  T.eq(w.input.text, "", "cleared after sending")
+  T.eq(stopped, 5, "every handled key is kept away from Aseprite's shortcuts")
+  w:onInputKey(ev("KeyZ", "z", { metaKey = true }))
+  T.eq(stopped, 5, "Cmd+Z still reaches Aseprite")
 end)

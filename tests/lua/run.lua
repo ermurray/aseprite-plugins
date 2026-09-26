@@ -9,7 +9,7 @@ local only = app.params.only or ""
 local suites = {
   "test_chat_model", "test_chat_render", "test_tools_inspect", "test_connection",
   "test_edit", "test_pixels", "test_palette", "test_layers_frames", "test_geometry",
-  "test_annotate_transform", "test_analyze", "test_chat_window", "test_project", "test_prefs_context", "test_open_sprites", "test_palettes", "test_fx_math", "test_fx", "test_maps", "test_builtin_toolstate", "test_scripts", "test_projectconfig", "test_import", "test_clips", "test_export", "test_launcher",
+  "test_annotate_transform", "test_analyze", "test_chat_window", "test_project", "test_prefs_context", "test_open_sprites", "test_palettes", "test_fx_math", "test_fx", "test_maps", "test_builtin_toolstate", "test_scripts", "test_projectconfig", "test_import", "test_clips", "test_export", "test_launcher", "test_textinput",
 }
 
 for _, name in ipairs(suites) do

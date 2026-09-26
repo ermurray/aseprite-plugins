@@ -1,4 +1,5 @@
 local ChatModel = require("agent.chat_model")
+local TextInput = require("agent.textinput")
 local render = require("agent.chat_render")
 local Connection = require("agent.connection")
 local tools = require("agent.tools")
@@ -16,6 +17,8 @@ local ChatWindow = {}
 ChatWindow.__index = ChatWindow
 
 local PAD, GAP = 6, 8
+local INPUT_LINES = 4
+local PLACEHOLDER = "Click here and type... Enter to send, Shift+Enter for a new line"
 local STATUS_TEXT = {
   connected = "Connected",
   connecting = "Connecting...",
@@ -60,6 +63,8 @@ function ChatWindow.new(opts)
     projectRoot = nil,
     projectName = "No project",
     attachNext = false,
+    input = TextInput.new(),
+    inputLineH = 14,
     pluginPath = opts.pluginPath,
     tick = 0,
   }, ChatWindow)
@@ -145,7 +150,23 @@ function ChatWindow:build()
   dlg:newrow()
   dlg:check{ id = "attach", text = "Attach view", selected = self.attachNext, onclick = function() self.attachNext = self.dlg.data.attach end }
   dlg:newrow()
-  dlg:entry{ id = "input", hexpand = true }
+  -- Aseprite has no multi-line entry, so the input box is a canvas driven by agent.textinput.
+  dlg:canvas{
+    id = "input",
+    width = 300,
+    height = INPUT_LINES * 15 + 2 * PAD,
+    hexpand = true,
+    onpaint = function(ev) self:paintInput(ev.context) end,
+    onkeydown = function(ev) self:onInputKey(ev) end,
+    onmousedown = function()
+      self.inputFocused = true
+      self:repaint()
+    end,
+    onwheel = function(ev)
+      self.input.scroll = math.max(0, self.input.scroll + ev.deltaY * self.inputLineH)
+      self:repaint()
+    end,
+  }
   dlg:button{ id = "send", text = "Send", focus = true, onclick = function() self:onSendOrStop() end }
   self.dlg = dlg
 end
@@ -321,7 +342,7 @@ function ChatWindow:answerApproval(approved)
 end
 
 function ChatWindow:onSendOrStop()
-  local text = (self.dlg.data.input or ""):match("^%s*(.-)%s*$")
+  local text = self.input.text:match("^%s*(.-)%s*$")
   local action = ChatModel.sendAction(self.busy, text, self.model:pendingApproval() ~= nil)
   if action == "deny" then
     self:answerApproval(false)
@@ -345,7 +366,7 @@ function ChatWindow:onSendOrStop()
   self.model:addUser(text)
   self.cancelRequested = false
   self.followTail = true
-  self.dlg:modify{ id = "input", text = "" }
+  self.input:clear()
   self.conn:send{ type = "user_message", text = text, context = context.build(self.projectRoot), attach = self.attachNext or nil }
   self.attachNext = false
   if self.open then self.dlg:modify{ id = "attach", selected = false } end
@@ -763,6 +784,50 @@ function ChatWindow.saveSelectionAsClip()
     ChatWindow.showTip(tostring(entry))
   else
     ChatWindow.showTip("Saved clip " .. entry.name .. (evicted and (" (removed " .. evicted .. ", limit reached)") or ""))
+  end
+end
+
+function ChatWindow:onInputKey(ev)
+  local r = self.input:handleKey(ev, function()
+    local ok, text = pcall(function() return app.clipboard.hasText and app.clipboard.text or nil end)
+    return ok and text or nil
+  end)
+  if r then
+    self.inputFocused = true
+    ev:stopPropagation()
+  end
+  if r == "send" then self:onSendOrStop() end
+  self:repaint()
+end
+
+function ChatWindow:paintInput(gc)
+  local lh = gc:measureText("Ag").height + 3
+  self.inputLineH = lh
+  local measure = function(s) return gc:measureText(s).width end
+  self.input.measure = measure
+  local lines = self.input:layout(gc.width - 2 * PAD, measure)
+  self.input:ensureVisible(lines, lh, gc.height - 2 * PAD, measure)
+
+  gc.color = themeColor("window_face", Color{ r = 40, g = 40, b = 48 })
+  gc:fillRect(Rectangle(0, 0, gc.width, gc.height))
+  gc.color = self.inputFocused and COLORS.agent_label or Color{ r = 110, g = 110, b = 120 }
+  gc:strokeRect(Rectangle(0, 0, gc.width, gc.height))
+
+  if self.input.text == "" then
+    gc.color = COLORS.activity
+    gc:fillText(PLACEHOLDER, PAD, PAD)
+  else
+    gc.color = themeColor("text", Color{ r = 230, g = 230, b = 230 })
+    for i, l in ipairs(lines) do
+      local y = PAD + (i - 1) * lh - self.input.scroll
+      if y > -lh and y < gc.height then gc:fillText(l.text, PAD, y) end
+    end
+  end
+  if self.inputFocused then
+    local idx, x = self.input:caret(lines, measure)
+    local y = PAD + (idx - 1) * lh - self.input.scroll
+    gc.color = themeColor("text", Color{ r = 230, g = 230, b = 230 })
+    gc:fillRect(Rectangle(PAD + x, y, 1, lh - 3))
   end
 end
 
